@@ -28,6 +28,9 @@ include("src/internals.jl")
 import Random
 Random.seed!(66);
 
+# output dict
+rows = Dict[]
+
 # --- Global Params ---
 n_networks = 10                    # number of networks to make
 t = 5                              # relaxation time after perturbation
@@ -43,13 +46,11 @@ C_dist = truncated(Normal(0.15, 0.05), C_min, C_max);
 
 for i in 1:n_networks
 
-    # --- 1. Get network params ---
-    
+    # --- 1. Sample parameters ---
     S = round(Int, rand(S_dist))
     C = rand(C_dist)
 
     # --- 2. Build Network ---
-
     fw = Foodweb(:niche; S, C)
 
     params = default_model(
@@ -60,11 +61,9 @@ for i in 1:n_networks
 
     A = params.A
 
-    # Initial biomasses
     B0 = rand(Uniform(0.1, 1), S)
 
-    # --- 3. Initial Burn-in ---
-
+    # --- 3. Burn-in ---
     sol = simulate(params, B0, t;
         callback = CallbackSet(
             extinction_callback(params, survival_threshold)
@@ -73,31 +72,45 @@ for i in 1:n_networks
 
     final_biomasses = sol.u[end]
 
-    # --- 4. Extract topologically relevant network ---
-    # alive and connected species
-
+    # --- 4. Extract valid network ---
     survivors, final_adj_matrix = extract_valid_network(A, final_biomasses, survival_threshold)
 
-    # Stop if system collapsed during burn-in
     if survivors === nothing
-        error("All species extinct after burn-in")
+        @warn "All species extinct after burn-in, skipping network $i"
+        continue
     end
 
-    # Build network object
     N = build_network(final_adj_matrix)
 
-    # --- 5. Topological Extinctions ---
-
+    # --- 5. Topological extinctions ---
     topo_results = run_topological_extinctions(N, params)
-
-    # --- 6. Dynamic Extinctions ---
-
-    dynamic_results = run_dynamic_extinctions(params, final_biomasses)
-
-    # --- 7. Get Robustness (R50) ---
-
     R_topo = compute_robustness(topo_results)
-    R_dyn  = compute_robustness(dynamic_results)
 
+    # --- 6. Dynamic extinctions ---
+    dynamic_results = run_dynamic_extinctions(params, final_biomasses)
+    R_dyn = compute_robustness(dynamic_results)
+
+    # --- 7. Build row ---
+    row = Dict(
+        :net_id => i,
+        :S => S,
+        :C => C,
+    )
+
+    # --- Add topological results ---
+    for (k, v) in R_topo
+        row[Symbol("topo_" * k)] = v
+    end
+
+    # --- Add dynamic results ---
+    for (k, v) in R_dyn
+        row[Symbol("dyn_" * k)] = v
+    end
+
+    # --- Append to row dict ---
+    push!(rows, row)
 
 end
+
+# create data frame object
+results_df = DataFrame(rows)
