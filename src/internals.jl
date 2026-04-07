@@ -194,10 +194,17 @@ function dynamic_extinction_adaptive(params, B_init;
 
     Nseq = SpeciesInteractionNetwork[]
 
+    # push initial network
+    alive = findall(i -> (B[i] > survival_threshold) && !removed[i], eachindex(B))
+    push!(Nseq, build_network(A[alive, alive]))
+
     step = 0
-    max_steps = S  # cannot remove more species than exist
+    max_steps = S
 
     prog = show_progress ? Progress(max_steps, "Dynamic extinctions ($(criterion))") : nothing
+
+    candidates = Int[]
+    metric = Int[]
 
     while true
 
@@ -219,19 +226,21 @@ function dynamic_extinction_adaptive(params, B_init;
         # --- Build subnetwork ---
         A_sub = A[alive, alive]
 
-        # Remove disconnected species
+        # --- Remove disconnected species ---
         has_prey = vec(sum(A_sub; dims=2)) .> 0
         has_consumer = vec(sum(A_sub; dims=1)) .> 0
         keep_mask = has_prey .| has_consumer
+
         alive = alive[keep_mask]
 
+        # --- Safety: stop if nothing left ---
         if isempty(alive)
             break
         end
 
         A_sub = A[alive, alive]
 
-        # --- Compute metric dynamically ---
+        # --- compute metric ---
         if criterion == :degree
             metric = vec(sum(A_sub, dims=2)) + vec(sum(A_sub, dims=1))
         elseif criterion == :generality
@@ -250,27 +259,48 @@ function dynamic_extinction_adaptive(params, B_init;
             error("Unknown criterion")
         end
 
-        # --- Select species (tie-broken randomly) ---
+        # --- Safety before using metric ---
+        if isempty(metric)
+            break
+        end
+
+        # --- If no valid candidates exist, terminate ---
+        if isempty(candidates) && criterion in (:random_basal, :random_consumer)
+            break
+        end
+
+        # --- Select species ---
         if criterion in (:random_basal, :random_consumer)
-        
-            # If no valid candidates exist, terminate the simulation
+
+            sp = alive[rand(candidates)]
+
+        else
+            if isempty(metric)
+                break
+            end
+
+            target_val = descending ? maximum(metric) : minimum(metric)
+            candidates = findall(x -> x == target_val, metric)
+
             if isempty(candidates)
                 break
             end
-        
-            sp = alive[rand(candidates)]
-        
-        else
-            target_val = descending ? maximum(metric) : minimum(metric)
-            candidates = findall(x -> x == target_val, metric)
+
             sp = alive[rand(candidates)]
         end
 
-        # --- HARD extinction (critical fix) ---
-        B[sp] = 0.0
+        # --- Extinction ---
+        B[sp] = survival_threshold
         removed[sp] = true
 
-        # --- Run for t generations ---
+        # --- Check if any species remain ---
+        alive_global = findall(x -> x > survival_threshold, B)
+
+        if isempty(alive_global)
+            break
+        end
+
+        # --- Run dynamics ---
         sol = simulate(params, B, t;
             callback = CallbackSet(
                 extinction_callback(params, survival_threshold)
@@ -279,20 +309,20 @@ function dynamic_extinction_adaptive(params, B_init;
 
         B = sol.u[end]
 
-        # --- Record resulting network ---
-        survivors, A_rec = extract_valid_network(A, B, survival_threshold)
+        # --- Record network (robust version) ---
+        alive_after = findall(x -> x > survival_threshold, B)
 
-        if survivors === nothing
+        if !isempty(alive_after)
+            push!(Nseq, build_network(A[alive_after, alive_after]))
+        else
             break
         end
 
-        push!(Nseq, build_network(A_rec))
-
-        # --- Progress update ---
+        # --- Progress ---
         if show_progress
             next!(prog; showvalues = [
                 (:step, step),
-                (:alive, length(survivors))
+                (:alive, length(alive_after))
             ])
         end
     end
