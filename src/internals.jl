@@ -190,21 +190,20 @@ function dynamic_extinction_adaptive(params, B_init;
     A = params.A
 
     S = length(B)
-    removed = falses(S)  # track forced removals
+    removed = falses(S)
 
     Nseq = SpeciesInteractionNetwork[]
 
-    # push initial network
-    alive = findall(i -> (B[i] > survival_threshold) && !removed[i], eachindex(B))
-    push!(Nseq, build_network(A[alive, alive]))
+    # --- initial network ---
+    alive_init = findall(x -> x > survival_threshold, B)
+    if !isempty(alive_init)
+        push!(Nseq, build_network(A[alive_init, alive_init]))
+    end
 
     step = 0
     max_steps = S
 
     prog = show_progress ? Progress(max_steps, "Dynamic extinctions ($(criterion))") : nothing
-
-    candidates = Int[]
-    metric = Int[]
 
     while true
 
@@ -216,31 +215,23 @@ function dynamic_extinction_adaptive(params, B_init;
             break
         end
 
-        # --- Identify alive & not already removed ---
+        # --- Identify alive species ---
         alive = findall(i -> (B[i] > survival_threshold) && !removed[i], eachindex(B))
 
         if isempty(alive)
             break
         end
 
-        # --- Build subnetwork ---
+        # --- Subnetwork ---
         A_sub = A[alive, alive]
 
-        # --- Remove disconnected species ---
-        has_prey = vec(sum(A_sub; dims=2)) .> 0
-        has_consumer = vec(sum(A_sub; dims=1)) .> 0
-        keep_mask = has_prey .| has_consumer
+        # --- Compute vulnerability (used later if needed) ---
+        vulnerability = vec(sum(A_sub, dims=1))
 
-        alive = alive[keep_mask]
+        # --- Compute candidates / metric ---
+        candidates = Int[]
+        metric = nothing
 
-        # --- Safety: stop if nothing left ---
-        if isempty(alive)
-            break
-        end
-
-        A_sub = A[alive, alive]
-
-        # --- compute metric ---
         if criterion == :degree
             metric = vec(sum(A_sub, dims=2)) + vec(sum(A_sub, dims=1))
         elseif criterion == :generality
@@ -250,32 +241,28 @@ function dynamic_extinction_adaptive(params, B_init;
         elseif criterion == :bodymass
             metric = params.body_mass[alive]
         elseif criterion == :random_basal
-            vulnerability = vec(sum(A_sub, dims=1))
             candidates = findall(x -> x == 0, vulnerability)
         elseif criterion == :random_consumer
-            vulnerability = vec(sum(A_sub, dims=1))
             candidates = findall(x -> x > 0, vulnerability)
         else
             error("Unknown criterion")
         end
 
-        # --- Safety before using metric ---
-        if isempty(metric)
-            break
-        end
-
-        # --- If no valid candidates exist, terminate ---
-        if isempty(candidates) && criterion in (:random_basal, :random_consumer)
-            break
-        end
-
-        # --- Select species ---
+        # --- Random case ---
         if criterion in (:random_basal, :random_consumer)
+
+            # fallback instead of terminating
+            if isempty(candidates)
+                break
+            end
 
             sp = alive[rand(candidates)]
 
+        # --- Metric case ---
         else
-            if isempty(metric)
+
+            # safety: avoid empty metric
+            if metric === nothing || isempty(metric)
                 break
             end
 
@@ -300,16 +287,21 @@ function dynamic_extinction_adaptive(params, B_init;
             break
         end
 
-        # --- Run dynamics ---
-        sol = simulate(params, B, t;
-            callback = CallbackSet(
-                extinction_callback(params, survival_threshold)
+        # --- Simulation ---
+        try
+            sol = simulate(params, B, t;
+                callback = CallbackSet(
+                    extinction_callback(params, survival_threshold)
+                )
             )
-        )
+            B = sol.u[end]
 
-        B = sol.u[end]
+        catch e
+            @warn "Simulation failed — stopping early" exception=e
+            break
+        end
 
-        # --- Record network (robust version) ---
+        # --- Record network ---
         alive_after = findall(x -> x > survival_threshold, B)
 
         if !isempty(alive_after)
