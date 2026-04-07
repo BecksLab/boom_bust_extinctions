@@ -7,7 +7,6 @@ Main workflow:
 - Dynamic Extinctions; 
 =#
 
-
 # --- 1. General Set-up ---
 
 # Load Dependencies
@@ -17,6 +16,7 @@ using Distributions
 using EcologicalNetworksDynamics
 using Extinctions
 using JLD2
+using ProgressMeter
 using SpeciesInteractionNetworks
 using Statistics
 

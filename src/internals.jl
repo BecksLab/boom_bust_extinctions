@@ -183,22 +183,43 @@ function dynamic_extinction_adaptive(params, B_init;
     criterion = :degree,
     descending = true,
     t = 5,
-    survival_threshold = 1e-3)
+    survival_threshold = 1e-3,
+    show_progress = true)
 
     B = copy(B_init)
     A = params.A
 
-    Nseq = Vector{Any}()
+    S = length(B)
+    removed = falses(S)  # track forced removals
+
+    Nseq = SpeciesInteractionNetwork[]
+
+    step = 0
+    max_steps = S  # cannot remove more species than exist
+
+    prog = show_progress ? Progress(max_steps, "Dynamic extinctions ($(criterion))") : nothing
 
     while true
 
-        alive = findall(x -> x > survival_threshold, B)
+        step += 1
+
+        # --- SAFETY STOP ---
+        if step > max_steps
+            @warn "Max steps reached — stopping early"
+            break
+        end
+
+        # --- Identify alive & not already removed ---
+        alive = findall(i -> (B[i] > survival_threshold) && !removed[i], eachindex(B))
+
         if isempty(alive)
             break
         end
 
+        # --- Build subnetwork ---
         A_sub = A[alive, alive]
 
+        # Remove disconnected species
         has_prey = vec(sum(A_sub; dims=2)) .> 0
         has_consumer = vec(sum(A_sub; dims=1)) .> 0
         keep_mask = has_prey .| has_consumer
@@ -210,7 +231,7 @@ function dynamic_extinction_adaptive(params, B_init;
 
         A_sub = A[alive, alive]
 
-        # --- Metric selection ---
+        # --- Compute metric dynamically ---
         if criterion == :degree
             metric = vec(sum(A_sub, dims=2)) + vec(sum(A_sub, dims=1))
         elseif criterion == :generality
@@ -219,21 +240,37 @@ function dynamic_extinction_adaptive(params, B_init;
             metric = vec(sum(A_sub, dims=1))
         elseif criterion == :bodymass
             metric = params.body_mass[alive]
-        elseif criterion == :random
-            metric = rand(length(alive))
+        elseif criterion == :random_basal
+            vulnerability = vec(sum(A_sub, dims=1))
+            candidates = findall(x -> x == 0, vulnerability)
+        elseif criterion == :random_consumer
+            vulnerability = vec(sum(A_sub, dims=1))
+            candidates = findall(x -> x > 0, vulnerability)
         else
             error("Unknown criterion")
         end
 
-        # --- Select species ---
-        target_val = descending ? maximum(metric) : minimum(metric)
-        candidates = findall(x -> x == target_val, metric)
-        sp = alive[rand(candidates)]
+        # --- Select species (tie-broken randomly) ---
+        if criterion in (:random_basal, :random_consumer)
+        
+            # If no valid candidates exist, terminate the simulation
+            if isempty(candidates)
+                break
+            end
+        
+            sp = alive[rand(candidates)]
+        
+        else
+            target_val = descending ? maximum(metric) : minimum(metric)
+            candidates = findall(x -> x == target_val, metric)
+            sp = alive[rand(candidates)]
+        end
 
-        # --- Apply extinction ---
-        B[sp] = survival_threshold
+        # --- HARD extinction (critical fix) ---
+        B[sp] = 0.0
+        removed[sp] = true
 
-        # --- Relax dynamics ---
+        # --- Run for t generations ---
         sol = simulate(params, B, t;
             callback = CallbackSet(
                 extinction_callback(params, survival_threshold)
@@ -242,7 +279,7 @@ function dynamic_extinction_adaptive(params, B_init;
 
         B = sol.u[end]
 
-        # --- Record network ---
+        # --- Record resulting network ---
         survivors, A_rec = extract_valid_network(A, B, survival_threshold)
 
         if survivors === nothing
@@ -250,6 +287,14 @@ function dynamic_extinction_adaptive(params, B_init;
         end
 
         push!(Nseq, build_network(A_rec))
+
+        # --- Progress update ---
+        if show_progress
+            next!(prog; showvalues = [
+                (:step, step),
+                (:alive, length(survivors))
+            ])
+        end
     end
 
     return Nseq
@@ -272,29 +317,44 @@ Run all adaptive dynamic extinction scenarios.
 - Vulnerability (high/low)
 - Generality (high/low)
 - Body mass (high/low)
-- Random removal
+- Random removal (consumer/basal only)
 
 # Notes
 - Each scenario uses adaptive re-ranking at every step
 - Results are directly comparable to topological sequences
 """
-function run_dynamic_extinctions(params, B)
+function run_dynamic_extinctions(params, B; show_progress=true)
 
     results = Dict()
 
-    results["degree_high"] = dynamic_extinction_adaptive(params, B; criterion=:degree, descending=true)
-    results["degree_low"]  = dynamic_extinction_adaptive(params, B; criterion=:degree, descending=false)
+    scenarios = [
+        ("degree_high",   :degree, true),
+        ("degree_low",    :degree, false),
+        ("vul_high",      :vulnerability, true),
+        ("vul_low",       :vulnerability, false),
+        ("gen_high",      :generality, true),
+        ("gen_low",       :generality, false),
+        ("bm_high",       :bodymass, true),
+        ("bm_low",        :bodymass, false),
+        ("rand_basal",    :random_basal, true),
+        ("rand_consumer", :random_consumer, true)
+    ]
 
-    results["vul_high"] = dynamic_extinction_adaptive(params, B; criterion=:vulnerability, descending=true)
-    results["vul_low"]  = dynamic_extinction_adaptive(params, B; criterion=:vulnerability, descending=false)
+    prog = show_progress ? Progress(length(scenarios), "Dynamic scenarios") : nothing
 
-    results["gen_high"] = dynamic_extinction_adaptive(params, B; criterion=:generality, descending=true)
-    results["gen_low"]  = dynamic_extinction_adaptive(params, B; criterion=:generality, descending=false)
+    for (name, crit, desc) in scenarios
 
-    results["bm_high"] = dynamic_extinction_adaptive(params, B; criterion=:bodymass, descending=true)
-    results["bm_low"]  = dynamic_extinction_adaptive(params, B; criterion=:bodymass, descending=false)
+        results[name] = dynamic_extinction_adaptive(
+            params, B;
+            criterion = crit,
+            descending = desc,
+            show_progress = show_progress
+        )
 
-    results["random"] = dynamic_extinction_adaptive(params, B; criterion=:random)
+        if show_progress
+            next!(prog)
+        end
+    end
 
     return results
 end
