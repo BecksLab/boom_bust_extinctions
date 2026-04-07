@@ -1,5 +1,9 @@
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 EcologicalNetworksDynamics = "2fd9189a-c387-4076-88b7-22b33b5a4388"
+Extinctions = "cd114cb6-7982-4017-a01c-1032758e0eff"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+SpeciesInteractionNetworks = "49e116ef-912f-4766-9e56-896a49944adc"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
