@@ -119,20 +119,29 @@ function run_topological_extinctions(N, params)
 
     results = Dict()
 
-    results["degree_high"] = extinction(N, "degree", true)
-    results["degree_low"]  = extinction(N, "degree", false)
+    scenarios = Dict(
+        "degree_high"   => extinction(N, "degree", true),
+        "degree_low"    => extinction(N, "degree", false),
+        "vul_high"      => extinction(N, "vulnerability", true),
+        "vul_low"       => extinction(N, "vulnerability", false),
+        "gen_high"      => extinction(N, "generality", true),
+        "gen_low"       => extinction(N, "generality", false),
+        "bm_high"       => extinction(N, Symbol.(sortperm(params.body_mass, rev=true))),
+        "bm_low"        => extinction(N, Symbol.(sortperm(params.body_mass, rev=false))),
+        "rand_basal"    => extinction(N; protect = :consumer),
+        "rand_consumer" => extinction(N; protect = :basal)
+    )
 
-    results["vul_high"] = extinction(N, "vulnerability", true)
-    results["vul_low"]  = extinction(N, "vulnerability", false)
+    for (name, Ns) in scenarios
 
-    results["gen_high"] = extinction(N, "generality", true)
-    results["gen_low"]  = extinction(N, "generality", false)
+        # primary = 1 species removed per step
+        primary_counts = collect(0:length(Ns)-1)
 
-    results["bm_high"] = extinction(N, Symbol.(sortperm(params.body_mass, rev=true)))
-    results["bm_low"]  = extinction(N, Symbol.(sortperm(params.body_mass, rev=false)))
-
-    results["rand_basal"]    = extinction(N; protect = :consumer)
-    results["rand_consumer"] = extinction(N; protect = :basal)
+        results[name] = (
+            networks = Ns,
+            primary = primary_counts
+        )
+    end
 
     return results
 end
@@ -184,7 +193,7 @@ function dynamic_extinction_adaptive(params, B_init;
     descending = true,
     t = 5,
     survival_threshold = 1e-3,
-    show_progress = true)
+    show_progress = false)
 
     B = copy(B_init)
     A = params.A
@@ -193,11 +202,14 @@ function dynamic_extinction_adaptive(params, B_init;
     removed = falses(S)
 
     Nseq = SpeciesInteractionNetwork[]
+    primary_count = Int[]
 
-    # --- initial network ---
+    # --- initial network (step 0) ---
     survivors_init, A_init = extract_valid_network(A, B, survival_threshold)
+
     if survivors_init !== nothing
         push!(Nseq, build_network(A_init))
+        push!(primary_count, 0)  # no removals yet
     end
 
     step = 0
@@ -209,22 +221,23 @@ function dynamic_extinction_adaptive(params, B_init;
 
         step += 1
 
+        # --- safety stop ---
         if step > max_steps
             @warn "Max steps reached — stopping early"
             break
         end
 
-        # --- Identify alive species ---
+        # --- identify alive species ---
         alive = findall(i -> (B[i] > survival_threshold) && !removed[i], eachindex(B))
 
         if isempty(alive)
             break
         end
 
-        # --- Subnetwork ---
+        # --- subnetwork ---
         A_sub = A[alive, alive]
 
-        # --- Compute vulnerability ---
+        # --- compute vulnerability ---
         vulnerability = vec(sum(A_sub, dims=1))
 
         candidates = Int[]
@@ -246,7 +259,7 @@ function dynamic_extinction_adaptive(params, B_init;
             error("Unknown criterion")
         end
 
-        # --- Select species ---
+        # --- select species ---
         if criterion in (:random_basal, :random_consumer)
 
             if isempty(candidates)
@@ -256,6 +269,7 @@ function dynamic_extinction_adaptive(params, B_init;
             sp = alive[rand(candidates)]
 
         else
+
             if metric === nothing || isempty(metric)
                 break
             end
@@ -270,11 +284,14 @@ function dynamic_extinction_adaptive(params, B_init;
             sp = alive[rand(candidates)]
         end
 
-        # --- Force extinction ---
+        # --- force extinction ---
         B[sp] = 0.0
         removed[sp] = true
 
-        # --- Simulation ---
+        # track primary removals
+        push!(primary_count, sum(removed))
+
+        # --- simulate dynamics ---
         try
             sol = simulate(params, B, t;
                 callback = CallbackSet(
@@ -284,7 +301,7 @@ function dynamic_extinction_adaptive(params, B_init;
 
             B = sol.u[end]
 
-            # prevent regrowth
+            # 🔑 prevent regrowth of removed species
             B[removed] .= 0.0
 
         catch e
@@ -292,7 +309,7 @@ function dynamic_extinction_adaptive(params, B_init;
             break
         end
 
-        # --- Extract valid network (connectivity filter) ---
+        # --- extract valid network (connectivity filter) ---
         survivors_after, A_valid = extract_valid_network(A, B, survival_threshold)
 
         if survivors_after === nothing
@@ -301,10 +318,7 @@ function dynamic_extinction_adaptive(params, B_init;
 
         push!(Nseq, build_network(A_valid))
 
-        # --- Debug (optional, very useful first run) ---
-        # println("Step $step: alive = ", length(survivors_after))
-
-        # --- Progress ---
+        # --- progress ---
         if show_progress
             next!(prog; showvalues = [
                 (:step, step),
@@ -313,7 +327,7 @@ function dynamic_extinction_adaptive(params, B_init;
         end
     end
 
-    return Nseq
+    return (networks = Nseq, primary = primary_count)
 end
 
 """
@@ -394,9 +408,56 @@ function compute_robustness(results_dict)
 
     R = Dict()
 
-    for (k, seq) in results_dict
-        R[k] = robustness(seq)
+    for (k, v) in results_dict
+        # extract only networks
+        R[k] = robustness(v.networks)
     end
 
     return R
+end
+
+function extinction_breakdown(result)
+
+    Ns = result.networks
+    primary_counts = result.primary
+
+    # --- enforce alignment safety ---
+    n = min(length(Ns), length(primary_counts))
+
+    Ns = Ns[1:n]
+    primary_counts = primary_counts[1:n]
+
+    initial = SpeciesInteractionNetworks.richness(first(Ns))
+
+    total_loss = (initial .- SpeciesInteractionNetworks.richness.(Ns)) ./ initial
+    primary_prop = primary_counts ./ initial
+    secondary_prop = total_loss .- primary_prop
+
+    return (
+        primary = primary_prop,
+        secondary = secondary_prop,
+        total = total_loss
+    )
+end
+
+function export_curves(curves_dict, type_label, net_id)
+
+    rows = DataFrame()
+
+    for (scenario, c) in curves_dict
+
+        n = length(c.total)
+
+        append!(rows, DataFrame(
+            net_id = fill(net_id, n),
+            type = fill(type_label, n),
+            scenario = fill(scenario, n),
+            step = 1:n,
+            primary = c.primary,
+            secondary = c.secondary,
+            total = c.total
+        ))
+    end
+
+    return rows
 end

@@ -30,10 +30,12 @@ Random.seed!(66);
 
 # output dict
 rows = Dict[]
+topo_curve_store = DataFrame()
+dyn_curve_store  = DataFrame()
 
 # --- Global Params ---
-n_networks = 10                    # number of networks to make
-t = 5                              # relaxation time after perturbation
+n_networks = 1000                  # number of networks to make
+t = 5000                           # relaxation time after perturbation
 survival_threshold = 1e-3          # extinction threshold
 S_min = 20                         # minimum number spp
 S_max = 60                         # max number spp               
@@ -84,11 +86,27 @@ for i in 1:n_networks
 
     # --- 5. Topological extinctions ---
     topo_results = run_topological_extinctions(N, params)
+    # r50
     R_topo = compute_robustness(topo_results)
+    # get extinction curves
+    topo_curves = Dict()
+    for (k, v) in topo_results
+        topo_curves[k] = extinction_breakdown(v)
+    end
+    topo_df = export_curves(topo_curves, "topo", i)
+    append!(topo_curve_store, topo_df)
 
     # --- 6. Dynamic extinctions ---
     dynamic_results = run_dynamic_extinctions(params, final_biomasses)
+    # r50
     R_dyn = compute_robustness(dynamic_results)
+    # get extinction curves
+    dyn_curves = Dict()
+    for (k, v) in dynamic_results
+        dyn_curves[k] = extinction_breakdown(v)
+    end
+    dyn_df = export_curves(dyn_curves, "dyn", i)
+    append!(dyn_curve_store, dyn_df)
 
     # --- 7. Build row ---
     row = Dict(
@@ -114,3 +132,10 @@ end
 
 # create data frame object
 results_df = DataFrame(rows)
+
+# extinction curves
+all_curve_df = vcat(topo_curve_store, dyn_curve_store)
+
+# Write files
+CSV.write("outputs/robustness_summaries.csv", results_df)
+CSV.write("outputs/extinction_curves.csv", all_curve_df)
