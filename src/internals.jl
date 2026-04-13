@@ -195,9 +195,9 @@ function dynamic_extinction_adaptive(params, B_init;
     Nseq = SpeciesInteractionNetwork[]
 
     # --- initial network ---
-    alive_init = findall(x -> x > survival_threshold, B)
-    if !isempty(alive_init)
-        push!(Nseq, build_network(A[alive_init, alive_init]))
+    survivors_init, A_init = extract_valid_network(A, B, survival_threshold)
+    if survivors_init !== nothing
+        push!(Nseq, build_network(A_init))
     end
 
     step = 0
@@ -209,7 +209,6 @@ function dynamic_extinction_adaptive(params, B_init;
 
         step += 1
 
-        # --- SAFETY STOP ---
         if step > max_steps
             @warn "Max steps reached — stopping early"
             break
@@ -225,10 +224,9 @@ function dynamic_extinction_adaptive(params, B_init;
         # --- Subnetwork ---
         A_sub = A[alive, alive]
 
-        # --- Compute vulnerability (used later if needed) ---
+        # --- Compute vulnerability ---
         vulnerability = vec(sum(A_sub, dims=1))
 
-        # --- Compute candidates / metric ---
         candidates = Int[]
         metric = nothing
 
@@ -248,20 +246,16 @@ function dynamic_extinction_adaptive(params, B_init;
             error("Unknown criterion")
         end
 
-        # --- Random case ---
+        # --- Select species ---
         if criterion in (:random_basal, :random_consumer)
 
-            # fallback instead of terminating
             if isempty(candidates)
                 break
             end
 
             sp = alive[rand(candidates)]
 
-        # --- Metric case ---
         else
-
-            # safety: avoid empty metric
             if metric === nothing || isempty(metric)
                 break
             end
@@ -276,16 +270,9 @@ function dynamic_extinction_adaptive(params, B_init;
             sp = alive[rand(candidates)]
         end
 
-        # --- Extinction ---
-        B[sp] = survival_threshold
+        # --- Force extinction ---
+        B[sp] = 0.0
         removed[sp] = true
-
-        # --- Check if any species remain ---
-        alive_global = findall(x -> x > survival_threshold, B)
-
-        if isempty(alive_global)
-            break
-        end
 
         # --- Simulation ---
         try
@@ -294,27 +281,34 @@ function dynamic_extinction_adaptive(params, B_init;
                     extinction_callback(params, survival_threshold)
                 )
             )
+
             B = sol.u[end]
+
+            # prevent regrowth
+            B[removed] .= 0.0
 
         catch e
             @warn "Simulation failed — stopping early" exception=e
             break
         end
 
-        # --- Record network ---
-        alive_after = findall(x -> x > survival_threshold, B)
+        # --- Extract valid network (connectivity filter) ---
+        survivors_after, A_valid = extract_valid_network(A, B, survival_threshold)
 
-        if !isempty(alive_after)
-            push!(Nseq, build_network(A[alive_after, alive_after]))
-        else
+        if survivors_after === nothing
             break
         end
+
+        push!(Nseq, build_network(A_valid))
+
+        # --- Debug (optional, very useful first run) ---
+        # println("Step $step: alive = ", length(survivors_after))
 
         # --- Progress ---
         if show_progress
             next!(prog; showvalues = [
                 (:step, step),
-                (:alive, length(alive_after))
+                (:alive, length(survivors_after))
             ])
         end
     end
