@@ -11,7 +11,8 @@ df <- read.csv("outputs/robustness_summaries.csv") %>%
 ggplot(df) +
   geom_abline(slope = 1) +
   geom_point(aes(x = topo,
-                 y = dyn)) +
+                 y = dyn),
+             alpha = 0.7) +
   facet_wrap(vars(scenario)) +
   xlim(0,0.5) +
   theme_classic()
@@ -31,10 +32,15 @@ curves_df <- read.csv("outputs/extinction_curves.csv")
 ggplot(curves_df) +
   geom_abline(slope = -1,
               intercept = 1) +
+  geom_abline(slope = -1,
+              intercept = 0.5,
+              linetype = "dashed") +
   geom_point(aes(x = primary,
                  y = secondary,
                  colour = type),
              alpha = 0.2,
-             shape = 15) +
+             shape = 15,
+             size = 0.5) +
   facet_wrap(vars(scenario)) +
+  ylim(0, 1) + 
   theme_classic()
