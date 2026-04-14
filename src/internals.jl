@@ -193,7 +193,8 @@ function dynamic_extinction_adaptive(params, B_init;
     descending = true,
     t = 5,
     survival_threshold = 1e-3,
-    show_progress = false)
+    show_progress = true,
+    debug = false)
 
     B = copy(B_init)
     A = params.A
@@ -204,13 +205,15 @@ function dynamic_extinction_adaptive(params, B_init;
     Nseq = SpeciesInteractionNetwork[]
     primary_count = Int[]
 
-    # --- initial network (step 0) ---
-    survivors_init, A_init = extract_valid_network(A, B, survival_threshold)
+    # --- initial network ---
+    alive_init = findall(i -> B[i] > survival_threshold, eachindex(B))
 
-    if survivors_init !== nothing
-        push!(Nseq, build_network(A_init))
-        push!(primary_count, 0)  # no removals yet
+    if isempty(alive_init)
+        return (networks = Nseq, primary = primary_count)
     end
+
+    push!(Nseq, build_network(A[alive_init, alive_init]))
+    push!(primary_count, 0)
 
     step = 0
     max_steps = S
@@ -221,13 +224,12 @@ function dynamic_extinction_adaptive(params, B_init;
 
         step += 1
 
-        # --- safety stop ---
         if step > max_steps
             @warn "Max steps reached — stopping early"
             break
         end
 
-        # --- identify alive species ---
+        # --- alive & not removed ---
         alive = findall(i -> (B[i] > survival_threshold) && !removed[i], eachindex(B))
 
         if isempty(alive)
@@ -237,63 +239,76 @@ function dynamic_extinction_adaptive(params, B_init;
         # --- subnetwork ---
         A_sub = A[alive, alive]
 
-        # --- compute vulnerability ---
-        vulnerability = vec(sum(A_sub, dims=1))
+        # --- compute metrics ---
+        vulnerability = vec(sum(A_sub, dims=1))   # in-degree
+        generality   = vec(sum(A_sub, dims=2))   # out-degree
+        degree       = vulnerability .+ generality
 
-        candidates = Int[]
-        metric = nothing
+        is_basal = vulnerability .== 0
+
+        # =========================
+        # 🎯 CANDIDATE FILTERING
+        # =========================
+
+        if criterion == :random_basal
+            candidates_local = findall(is_basal)
+
+        else
+            # ALL OTHER SCENARIOS: consumers only
+            candidates_local = findall(.!is_basal)
+        end
+
+        if isempty(candidates_local)
+            break
+        end
+
+        # METRIC SELECTION
 
         if criterion == :degree
-            metric = vec(sum(A_sub, dims=2)) + vec(sum(A_sub, dims=1))
+            metric = degree
+
         elseif criterion == :generality
-            metric = vec(sum(A_sub, dims=2))
+            metric = generality
+
         elseif criterion == :vulnerability
-            metric = vec(sum(A_sub, dims=1))
+            metric = vulnerability
+
         elseif criterion == :bodymass
             metric = params.body_mass[alive]
-        elseif criterion == :random_basal
-            candidates = findall(x -> x == 0, vulnerability)
-        elseif criterion == :random_consumer
-            candidates = findall(x -> x > 0, vulnerability)
+
+        elseif criterion in (:random_basal, :random_consumer)
+            metric = nothing
+
         else
             error("Unknown criterion")
         end
 
-        # --- select species ---
-        if criterion in (:random_basal, :random_consumer)
+        # SELECT SPECIES
 
-            if isempty(candidates)
-                break
-            end
-
-            sp = alive[rand(candidates)]
+        if metric === nothing
+            sp_local = rand(candidates_local)
 
         else
+            sub_metric = metric[candidates_local]
 
-            if metric === nothing || isempty(metric)
-                break
-            end
+            target_val = descending ? maximum(sub_metric) : minimum(sub_metric)
+            tied = findall(x -> x == target_val, sub_metric)
 
-            target_val = descending ? maximum(metric) : minimum(metric)
-            candidates = findall(x -> x == target_val, metric)
-
-            if isempty(candidates)
-                break
-            end
-
-            sp = alive[rand(candidates)]
+            sp_local = candidates_local[rand(tied)]
         end
+
+        sp = alive[sp_local]
 
         # --- force extinction ---
         B[sp] = 0.0
         removed[sp] = true
 
-        # track primary removals
         push!(primary_count, sum(removed))
 
         # --- simulate dynamics ---
         try
             sol = simulate(params, B, t;
+                show_degenerated = false,
                 callback = CallbackSet(
                     extinction_callback(params, survival_threshold)
                 )
@@ -301,7 +316,7 @@ function dynamic_extinction_adaptive(params, B_init;
 
             B = sol.u[end]
 
-            # 🔑 prevent regrowth of removed species
+            # enforce permanent extinction
             B[removed] .= 0.0
 
         catch e
@@ -309,20 +324,47 @@ function dynamic_extinction_adaptive(params, B_init;
             break
         end
 
-        # --- extract valid network (connectivity filter) ---
-        survivors_after, A_valid = extract_valid_network(A, B, survival_threshold)
+        # --- alive after dynamics ---
+        alive_after = findall(i -> (B[i] > survival_threshold) && !removed[i], eachindex(B))
 
-        if survivors_after === nothing
+        if isempty(alive_after)
             break
         end
 
-        push!(Nseq, build_network(A_valid))
+        # =========================
+        # OPTIONAL: enforce prey dependence (stronger cascades)
+        # =========================
+        # Uncomment if needed
+        #
+        # A_tmp = A[alive_after, alive_after]
+        # has_prey = vec(sum(A_tmp, dims=2)) .> 0
+        #
+        # for (idx, has) in enumerate(has_prey)
+        #     if !has
+        #         sp_global = alive_after[idx]
+        #         B[sp_global] = 0.0
+        #         removed[sp_global] = true
+        #     end
+        # end
+        #
+        # alive_after = findall(i -> (B[i] > survival_threshold) && !removed[i], eachindex(B))
+
+        # --- record network ---
+        N_new = build_network(A[alive_after, alive_after])
+        push!(Nseq, N_new)
+
+        # =========================
+        # 🔍 DEBUG
+        # =========================
+        if debug
+            println("Step $step | Alive: $(length(alive_after)) | Removed: $(sum(removed))")
+        end
 
         # --- progress ---
         if show_progress
             next!(prog; showvalues = [
                 (:step, step),
-                (:alive, length(survivors_after))
+                (:alive, length(alive_after))
             ])
         end
     end
