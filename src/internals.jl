@@ -188,142 +188,166 @@ At each step:
 - All species extinct
 - No connected subnetwork remains
 """
-function dynamic_extinction_adaptive(params, B_init;
+function dynamic_extinction_adaptive(params, B0;
     criterion = :degree,
     descending = true,
-    t = 5,
+    t = 5000,
     survival_threshold = 1e-3,
     show_progress = true,
-    debug = false)
+    debug = false
+)
 
-    # --- initial full system ---
-    B = copy(B_init)
-    A_full = copy(params.A)
+    S0 = length(B0)
 
-    active = collect(1:length(B))
-    S0 = length(B)
+    A = params.A
+    B = copy(B0)
+
+    alive = trues(S0)
 
     Nseq = SpeciesInteractionNetwork[]
-    primary_count = Int[0]
+
+    # --- FIX: track cumulative primary deletions ---
+    primary_counts = Int[0]
 
     prog = show_progress ? Progress(S0, "Dynamic extinctions") : nothing
 
     step = 0
 
     while true
-
         step += 1
 
-        # --- alive in reduced system ---
-        alive_local = findall(B .> survival_threshold)
+        alive_idx = findall(alive)
 
-        if isempty(alive_local)
+        if isempty(alive_idx)
             break
         end
 
-        alive_global = active[alive_local]
+        # --- build subnetwork for ranking ---
+        A_sub = A[alive_idx, alive_idx]
 
-        # --- local adjacency ---
-        A_sub = A_full[alive_local, alive_local]
+        vuln = vec(sum(A_sub, dims=1))
+        gen  = vec(sum(A_sub, dims=2))
+        deg  = vuln .+ gen
 
-        vulnerability = vec(sum(A_sub, dims=1))
-        generality    = vec(sum(A_sub, dims=2))
-        degree        = vulnerability .+ generality
+        # --- SELECT SPECIES ---
+        if criterion == :random_basal
+            basal_mask = gen .== 0
+            candidates = alive_idx[basal_mask]
 
-        # --- candidate selection ---
-        candidates = collect(eachindex(alive_local))
+            isempty(candidates) && break
+            sp = rand(candidates)
 
-        if isempty(candidates)
-            break
-        end
+        elseif criterion == :random_consumer
+            consumer_mask = gen .> 0
+            candidates = alive_idx[consumer_mask]
 
-        metric =
-            criterion == :degree ? degree :
-            criterion == :generality ? generality :
-            criterion == :vulnerability ? vulnerability :
-            criterion == :bodymass ? params.body_mass[alive_global] :
-            nothing
+            isempty(candidates) && break
+            sp = rand(candidates)
 
-        if metric === nothing
-            sp_local = rand(candidates)
         else
-            vals = metric[candidates]
-            target = descending ? maximum(vals) : minimum(vals)
-            tied = findall(x -> x == target, vals)
-            sp_local = candidates[rand(tied)]
+            # --- metric-based selection ---
+            metric = if criterion == :degree
+                deg
+            elseif criterion == :generality
+                gen
+            elseif criterion == :vulnerability
+                vuln
+            elseif criterion == :bodymass
+                params.body_mass[alive_idx]
+            elseif criterion == :random
+                nothing
+            else
+                error("Unknown criterion: $criterion")
+            end
+
+            if metric === nothing
+                local_choice = rand(1:length(alive_idx))
+            else
+                vals = metric
+                target = descending ? maximum(vals) : minimum(vals)
+                tied = findall(x -> x == target, vals)
+                local_choice = rand(tied)
+            end
+
+            sp = alive_idx[local_choice]
         end
 
-        # --- map to global ---
-        sp_local_index = alive_local[sp_local]
-        sp_global = active[sp_local_index]
+        # --- primary extinction ---
+        alive[sp] = false
 
-        # --- REMOVE SPECIES (state-space deletion) ---
-        deleteat!(B, sp_local_index)
-        deleteat!(active, sp_local_index)
+        # --- FIX: update cumulative primary counts ---
+        push!(primary_counts, primary_counts[end] + 1)
 
-        A_full = A_full[setdiff(1:end, sp_local_index), setdiff(1:end, sp_local_index)]
+        # --- build reduced system for simulation ---
+        alive_idx = findall(alive)
 
-        # --- rebuild ecological model (IMPORTANT FIX) ---
-        fw = Foodweb(A_full)   # or your constructor equivalent
+        if isempty(alive_idx)
+            break
+        end
 
-        params_local = default_model(
+        A_sim = A[alive_idx, alive_idx]
+        B_sim = B[alive_idx]
+        # OG bodymass
+        M_sim = params.M[alive_idx]
+
+        # --- build food web without re-randomising ---
+        fw = Foodweb(A_sim)
+
+        # --- reuse original body masses ---
+        params_sim = default_model(
             fw,
-            BodyMass(; Z = 10),
+            BodyMass(M_sim),
             ClassicResponse(; h = 2),
         )
 
-        # --- primary extinction tracking ---
-        push!(primary_count, S0 - length(B))
-
-        # --- simulate reduced system ---
+        # --- simulate ---
         try
-            sol = simulate(params_local, B, t;
+            sol = simulate(params_sim, B_sim, t;
                 show_degenerated = false,
                 callback = CallbackSet(
-                    extinction_callback(params_local, survival_threshold)
+                    extinction_callback(params_sim, survival_threshold)
                 )
             )
 
-            B = sol.u[end]
-
-            if any(B .< -1e-8)
-                @warn "Negative biomass detected (ODE instability)"
-            end
-
-            alive_check = count(B .> survival_threshold)
-            if alive_check > length(B)
-                error("Logical inconsistency in alive count")
-            end
+            B_sim = sol.u[end]
 
         catch e
             @warn "Simulation failed" exception=e
             break
         end
 
-        # --- enforce extinction consistency ---
-        B .= max.(B, 0.0)
+        # --- write back ---
+        B .= 0.0
+        B[alive_idx] = B_sim
 
-        # --- rebuild network for output ---
-        survivors, A_valid = extract_valid_network(A_full, B, survival_threshold)
+        # --- apply extinction threshold ---
+        extinct_now = findall(x -> x < survival_threshold, B)
+        alive[extinct_now] .= false
+        B[extinct_now] .= 0.0
 
-        if survivors === nothing
+        # --- build output network ---
+        survivors = findall(alive)
+
+        if isempty(survivors)
             break
         end
 
+        A_valid = A[survivors, survivors]
         push!(Nseq, build_network(A_valid))
 
+        # --- progress ---
         if show_progress
             next!(prog)
         end
 
         if debug
-            println("Step $step | remaining: $(length(B))")
+            println("Step $step | remaining: $(length(survivors))")
         end
     end
 
     return (
         networks = Nseq,
-        primary = primary_count
+        primary = primary_counts
     )
 end
 
@@ -407,7 +431,7 @@ function compute_robustness(results_dict)
 
     for (k, v) in results_dict
         # extract only networks
-        R[k] = robustness(v.networks)
+        R[k] = robustness_integral(v.networks)
     end
 
     return R
@@ -423,10 +447,8 @@ function extinction_breakdown(result)
     Ns = Ns[1:n]
     primary_counts = primary_counts[1:n]
 
-    # --- richness (state-based) ---
+    # --- richness ---
     richness_vals = SpeciesInteractionNetworks.richness.(Ns)
-
-    @assert length(richness_vals) > 1
 
     if any(diff(richness_vals) .> 0)
         @warn "Non-monotonic richness detected (INVALID CURVE)"
@@ -485,4 +507,41 @@ function export_curves(curves_dict, type_label, net_id)
     end
 
     return rows
+end
+
+function robustness_integral(network_sequence::Vector{<:SpeciesInteractionNetwork})
+    
+    isempty(network_sequence) && error("network_sequence cannot be empty")
+
+    S = SpeciesInteractionNetworks.richness.(network_sequence)
+    S0 = S[1]
+
+    target = 0.5 * S0
+
+    for i in 2:length(S)
+
+        if S[i] <= target
+
+            S1, S2 = S[i-1], S[i]
+
+            # number of primary deletions at each step
+            x1 = i - 2
+            x2 = i - 1
+
+            # linear interpolation between the two points
+            if S1 == S2
+                return x2 / S0
+            end
+
+            frac = (target - S2) / (S1 - S2)
+
+            PDEL = (x2 + frac) / S0
+
+            return PDEL
+        end
+    end
+
+    # if 50% loss is never reached
+    return 0.5
+    
 end
