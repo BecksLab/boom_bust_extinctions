@@ -34,8 +34,8 @@ topo_curve_store = DataFrame()
 dyn_curve_store  = DataFrame()
 
 # --- Global Params ---
-n_networks = 1000                  # number of networks to make
-t = 5000                           # relaxation time after perturbation
+n_networks = 100                  # number of networks to make
+t = 5000                          # relaxation time after perturbation
 survival_threshold = 1e-3          # extinction threshold
 S_min = 20                         # minimum number spp
 S_max = 60                         # max number spp               
@@ -67,6 +67,7 @@ for i in 1:n_networks
 
     # --- 3. Burn-in ---
     sol = simulate(params, B0, t;
+        show_degenerated = false,
         callback = CallbackSet(
             extinction_callback(params, survival_threshold)
         )
