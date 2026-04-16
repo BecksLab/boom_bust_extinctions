@@ -524,24 +524,23 @@ function robustness_integral(network_sequence::Vector{<:SpeciesInteractionNetwor
 
             S1, S2 = S[i-1], S[i]
 
-            # number of primary deletions at each step
-            x1 = i - 2
-            x2 = i - 1
+            # PDEL values
+            x1 = (i - 2) / S0
+            x2 = (i - 1) / S0
 
-            # linear interpolation between the two points
             if S1 == S2
-                return x2 / S0
+                return x2
             end
 
-            frac = (target - S2) / (S1 - S2)
+            # linear interpolation
+            frac = (target - S1) / (S2 - S1)
 
-            PDEL = (x2 + frac) / S0
+            R50 = x1 + frac * (x2 - x1)
 
-            return PDEL
+            return R50
         end
     end
 
-    # if 50% loss is never reached
     return 0.5
     
 end
