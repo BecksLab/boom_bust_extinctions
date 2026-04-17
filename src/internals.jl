@@ -120,16 +120,16 @@ function run_topological_extinctions(N, params)
     results = Dict()
 
     scenarios = Dict(
-        "degree_high"   => extinction(N, "degree", true),
-        "degree_low"    => extinction(N, "degree", false),
-        "vul_high"      => extinction(N, "vulnerability", true),
-        "vul_low"       => extinction(N, "vulnerability", false),
-        "gen_high"      => extinction(N, "generality", true),
-        "gen_low"       => extinction(N, "generality", false),
-        "bm_high"       => extinction(N, Symbol.(sortperm(params.body_mass, rev=true))),
-        "bm_low"        => extinction(N, Symbol.(sortperm(params.body_mass, rev=false))),
-        "rand_basal"    => extinction(N; protect = :consumer),
-        "rand_consumer" => extinction(N; protect = :basal)
+        "degree_high"   => extinction(N, "degree", true; remove_disconnected = false),
+        "degree_low"    => extinction(N, "degree", false; remove_disconnected = false),
+        "vul_high"      => extinction(N, "vulnerability", true; remove_disconnected = false),
+        "vul_low"       => extinction(N, "vulnerability", false; remove_disconnected = false),
+        "gen_high"      => extinction(N, "generality", true; remove_disconnected = false),
+        "gen_low"       => extinction(N, "generality", false; remove_disconnected = false),
+        "bm_high"       => extinction(N, Symbol.(sortperm(params.body_mass, rev=true)); remove_disconnected = false),
+        "bm_low"        => extinction(N, Symbol.(sortperm(params.body_mass, rev=false)); remove_disconnected = false),
+        "rand_basal"    => extinction(N; protect = :consumer, remove_disconnected = false),
+        "rand_consumer" => extinction(N; protect = :basal, remove_disconnected = false)
     )
 
     for (name, Ns) in scenarios
