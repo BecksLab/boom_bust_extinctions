@@ -202,6 +202,11 @@ function dynamic_extinction_adaptive(params, B0;
     A = params.A
     B = copy(B0)
 
+    # id species roles
+    gen0 = vec(sum(A, dims=2))   # out-degree
+    basal0 = gen0 .== 0
+    consumer0 = gen0 .> 0
+
     alive = trues(S0)
 
     Nseq = SpeciesInteractionNetwork[]
@@ -231,15 +236,13 @@ function dynamic_extinction_adaptive(params, B0;
 
         # --- SELECT SPECIES ---
         if criterion == :random_basal
-            basal_mask = gen .== 0
-            candidates = alive_idx[basal_mask]
+            candidates = filter(i -> alive[i] && basal0[i], eachindex(alive))
 
             isempty(candidates) && break
             sp = rand(candidates)
 
         elseif criterion == :random_consumer
-            consumer_mask = gen .> 0
-            candidates = alive_idx[consumer_mask]
+            candidates = filter(i -> alive[i] && consumer0[i], eachindex(alive))
 
             isempty(candidates) && break
             sp = rand(candidates)
@@ -270,6 +273,11 @@ function dynamic_extinction_adaptive(params, B0;
             end
 
             sp = alive_idx[local_choice]
+        end
+
+        # quick sanity check
+        if criterion == :random_consumer
+            @assert all(consumer0[candidates])
         end
 
         # --- primary extinction ---
