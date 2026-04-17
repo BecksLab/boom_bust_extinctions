@@ -1,23 +1,23 @@
 """
     build_network(adj_mat::Matrix{Bool})
 
-Construct a `SpeciesInteractionNetwork` object from a square adjacency matrix.
+Construct a `SpeciesInteractionNetwork` from a Boolean adjacency matrix.
 
-This function converts a Boolean adjacency matrix into a 
-`SpeciesInteractionNetwork{Unipartite{Symbol}, Binary{Bool}}` object, 
-where species are assigned generic symbolic identifiers (`:1`, `:2`, ..., `:S`).
+Converts a square adjacency matrix into a unipartite, binary food web where
+species are assigned generic symbolic identifiers (`:1`, `:2`, ..., `:S`).
 
 # Arguments
 - `adj_mat::Matrix{Bool}`: Square adjacency matrix (S × S), where:
-    - `adj_mat[i, j] = true` indicates an interaction from species `i` to `j`
-    - Rows and columns correspond to the same ordered set of species
+    - `adj_mat[i, j] = true` indicates a trophic interaction (i consumes j)
+    - Rows and columns refer to the same ordered species set
 
 # Returns
-- `SpeciesInteractionNetwork`: A unipartite binary interaction network
+- `SpeciesInteractionNetwork{Unipartite{Symbol}, Binary{Bool}}`
 
-# Assumptions
-- The matrix is square (same number of rows and columns)
-- Species identities are not preserved (relabelled as generic symbols)
+# Notes
+- Species identities are not preserved (relabelled as `:1`, ..., `:S`)
+- Interaction direction is preserved
+- Assumes adjacency matrix is already ecologically valid
 
 # Errors
 - Throws `ArgumentError` if the matrix is not square
@@ -40,11 +40,11 @@ end
 """
     extract_valid_network(A, B, threshold)
 
-Extract the ecologically valid subnetwork based on biomass and connectivity.
+Extract an ecologically valid subnetwork based on biomass and connectivity.
 
-Filters species based on:
-1. Biomass threshold (alive vs extinct)
-2. Network connectivity (removes isolated species)
+Species are retained if they:
+1. Have biomass above a survival threshold
+2. Participate in at least one trophic interaction
 
 # Arguments
 - `A::Matrix`: Full adjacency matrix
@@ -54,16 +54,17 @@ Filters species based on:
 # Returns
 - `(survivors, A_sub)`:
     - `survivors::Vector{Int}`: Indices of retained species
-    - `A_sub::Matrix`: Reduced adjacency matrix
+    - `A_sub::Matrix`: Induced subnetwork adjacency matrix
 - `(nothing, nothing)` if no valid species remain
 
 # Ecological Interpretation
-- Removes extinct species (`B ≤ threshold`)
-- Removes species with no trophic links (no prey AND no consumers)
+- Species with `B ≤ threshold` are considered extinct
+- Species with no prey AND no consumers are removed as non-functional
+- Ensures resulting network is trophically connected
 
 # Notes
-- Connectivity filtering ensures only functionally integrated species remain
-- This matches assumptions used in topological extinction workflows
+- Mirrors assumptions used in topological extinction workflows
+- Does NOT distinguish basal vs consumer roles explicitly
 """
 function extract_valid_network(A, B, threshold)
 
@@ -91,29 +92,41 @@ end
 """
     run_topological_extinctions(N, params)
 
-Run a suite of topological extinction sequences on a network.
+Run topological (structural) extinction sequences on a food web.
 
-Applies multiple extinction strategies based on structural metrics
-and returns the resulting extinction sequences.
+Species are removed sequentially according to structural traits, and
+secondary extinctions occur via trophic disconnection (cascade mechanism).
 
 # Arguments
-- `N`: A `SpeciesInteractionNetwork`
+- `N`: `SpeciesInteractionNetwork`
 - `params`: Model parameters (used for body mass ordering)
 
 # Returns
-- `Dict{String, Any}`: Mapping from scenario name to extinction sequence
+- `Dict{String, NamedTuple}`:
+    - `networks`: sequence of networks after each extinction step
+    - `primary`: cumulative number of primary deletions
 
-# Extinction Strategies
-- `"degree_high"` / `"degree_low"`: Remove by connectivity
-- `"vul_high"` / `"vul_low"`: Remove by vulnerability (in-degree)
-- `"gen_high"` / `"gen_low"`: Remove by generality (out-degree)
-- `"bm_high"` / `"bm_low"`: Remove by body mass
-- `"rand_basal"`: Random removal of basal species only
-- `"rand_consumer"`: Random removal of consumers only
+# Extinction Scenarios
+- `"degree_high"` / `"degree_low"`: connectivity-based removal
+- `"vul_high"` / `"vul_low"`: vulnerability (in-degree)
+- `"gen_high"` / `"gen_low"`: generality (out-degree)
+- `"bm_high"` / `"bm_low"`: body mass ordering
+- `"rand_basal"`: random removal of basal species only
+- `"rand_consumer"`: random removal of consumers only
+
+# Ecological Assumptions
+- Secondary extinctions occur when species lose all prey
+- Basal species are defined by generality = 0 (in initial network)
+- Random removal respects initial trophic roles (fixed classification)
+
+# Important Implementation Detail
+- `remove_disconnected = false`:
+    - Disconnected species are NOT removed unless they lose all prey
+    - This prevents artificial inflation of secondary extinctions
 
 # Notes
-- These are purely structural (no dynamics)
-- Sequences are compatible with `robustness()`
+- No population dynamics are simulated
+- Fully comparable to classical topological robustness studies
 """
 function run_topological_extinctions(N, params)
 
@@ -147,46 +160,50 @@ function run_topological_extinctions(N, params)
 end
 
 """
-    dynamic_extinction_adaptive(params, B_init; kwargs...)
+    dynamic_extinction_adaptive(params, B0; kwargs...)
 
-Run adaptive dynamic extinction simulations with sequential perturbations.
+Run adaptive dynamical extinction simulations with sequential species removal.
 
 At each step:
-1. Identify currently viable species
-2. Recompute network structure
-3. Select a target species based on a chosen criterion
-4. Force its extinction
-5. Simulate dynamics for `t` time units
-6. Record resulting network
-7. Repeat until collapse
+1. Select a target species (based on a criterion)
+2. Force its extinction (primary removal)
+3. Simulate system dynamics for `t` time steps
+4. Record secondary extinctions (biomass collapse)
+5. Repeat until system collapse
 
 # Arguments
-- `params`: Model parameters (includes adjacency matrix and dynamics)
-- `B_init::Vector`: Initial species biomasses
+- `params`: Model parameters (includes adjacency matrix and body masses)
+- `B0::Vector`: Initial biomasses after burn-in
 
 # Keyword Arguments
-- `criterion::Symbol`: Metric for species removal
-    - `:degree`, `:generality`, `:vulnerability`, `:bodymass`, `:random`
-- `descending::Bool`: Whether to remove highest (true) or lowest (false) value
-- `t::Int`: Simulation time after each extinction event
-- `survival_threshold::Float64`: Biomass threshold for extinction
+- `criterion::Symbol`: Removal rule
+    - `:degree`, `:generality`, `:vulnerability`, `:bodymass`
+    - `:random_basal`, `:random_consumer`
+- `descending::Bool`: Remove highest (true) or lowest (false)
+- `t::Int`: Simulation duration after each deletion
+- `survival_threshold::Float64`: Biomass extinction threshold
+- `show_progress::Bool`
+- `debug::Bool`
 
 # Returns
-- `Vector`: Sequence of `SpeciesInteractionNetwork` objects
+- NamedTuple:
+    - `networks`: sequence of surviving subnetworks
+    - `primary`: cumulative number of primary deletions
 
 # Ecological Interpretation
-- Combines press perturbations (species removal) with relaxation dynamics
-- Captures cascading secondary extinctions
-- Extinction order adapts to changing network structure
+- Combines press perturbations with relaxation dynamics
+- Secondary extinctions emerge from population dynamics
+- Captures indirect effects and trophic cascades
+
+# Key Assumptions
+- Body masses are FIXED from initial network (no re-sampling)
+- Basal/consumer roles for random deletions are FIXED from initial network
+- Species go extinct if `B < survival_threshold`
 
 # Notes
-- The full dynamical system is preserved (no species removal from ODE system)
-- Only the recorded networks are reduced
-- Multiple species may go extinct per step due to cascades
-
-# Stopping Conditions
-- All species extinct
-- No connected subnetwork remains
+- Multiple species may go extinct per step
+- Extinction order is adaptive (recomputed each step)
+- This corresponds to the dynamical approach in the Curtsdottir 2011
 """
 function dynamic_extinction_adaptive(params, B0;
     criterion = :degree,
@@ -445,6 +462,35 @@ function compute_robustness(results_dict)
     return R
 end
 
+"""
+    extinction_breakdown(result)
+
+Decompose extinction trajectories into primary and secondary components.
+
+# Arguments
+- `result`: NamedTuple with:
+    - `networks`: sequence of networks
+    - `primary`: cumulative primary deletions
+
+# Returns
+- NamedTuple:
+    - `primary`: proportion of primary removals (PDEL)
+    - `secondary`: proportion of secondary extinctions
+    - `total`: total extinction proportion
+
+# Definitions
+- Primary extinction: directly removed species
+- Secondary extinction: species lost due to cascading effects
+- Total extinction = primary + secondary
+
+# Notes
+- All values are normalised by initial richness (S0)
+- Primary is constrained to not exceed total extinction
+- Ensures physically consistent decomposition
+
+# Warnings
+- Emits warnings if extinction curve is non-monotonic
+"""
 function extinction_breakdown(result)
 
     Ns = result.networks
@@ -517,6 +563,33 @@ function export_curves(curves_dict, type_label, net_id)
     return rows
 end
 
+"""
+    robustness_integral(network_sequence)
+
+Compute robustness (R50) from an extinction sequence.
+
+R50 is defined as the proportion of species that must be removed
+(primary deletions) to cause 50% total species loss.
+
+# Arguments
+- `network_sequence`: Vector of `SpeciesInteractionNetwork`
+
+# Returns
+- `Float64`: R50 value (∈ [0, 0.5])
+
+# Method
+- Tracks species richness decline across extinction steps
+- Identifies when richness falls below 50% of initial richness (S0)
+- Uses linear interpolation between steps to estimate R50
+
+# Interpretation
+- R50 = 0.5 → no secondary extinctions (max robustness)
+- R50 < 0.5 → cascading extinctions reduce robustness
+
+# Notes
+- Assumes 1 primary deletion per step
+- Uses step index as proxy for PDEL (as in topological approaches)
+"""
 function robustness_integral(network_sequence::Vector{<:SpeciesInteractionNetwork})
     
     isempty(network_sequence) && error("network_sequence cannot be empty")
