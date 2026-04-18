@@ -133,16 +133,16 @@ function run_topological_extinctions(N, params)
     results = Dict()
 
     scenarios = Dict(
-        "degree_high"   => extinction(N, "degree", true; remove_disconnected = false),
-        "degree_low"    => extinction(N, "degree", false; remove_disconnected = false),
-        "vul_high"      => extinction(N, "vulnerability", true; remove_disconnected = false),
-        "vul_low"       => extinction(N, "vulnerability", false; remove_disconnected = false),
-        "gen_high"      => extinction(N, "generality", true; remove_disconnected = false),
-        "gen_low"       => extinction(N, "generality", false; remove_disconnected = false),
-        "bm_high"       => extinction(N, Symbol.(sortperm(params.body_mass, rev=true)); remove_disconnected = false),
-        "bm_low"        => extinction(N, Symbol.(sortperm(params.body_mass, rev=false)); remove_disconnected = false),
-        "rand_basal"    => extinction(N; protect = :consumer, remove_disconnected = false),
-        "rand_consumer" => extinction(N; protect = :basal, remove_disconnected = false)
+        "degree_high"   => extinction(N, "degree", true),
+        "degree_low"    => extinction(N, "degree", false),
+        "vul_high"      => extinction(N, "vulnerability", true),
+        "vul_low"       => extinction(N, "vulnerability", false),
+        "gen_high"      => extinction(N, "generality", true),
+        "gen_low"       => extinction(N, "generality", false),
+        "bm_high"       => extinction(N, Symbol.(sortperm(params.body_mass, rev=true))),
+        "bm_low"        => extinction(N, Symbol.(sortperm(params.body_mass, rev=false))),
+        "rand_basal"    => extinction(N; protect = :consumer),
+        "rand_consumer" => extinction(N; protect = :basal)
     )
 
     for (name, Ns) in scenarios
@@ -209,7 +209,7 @@ function dynamic_extinction_adaptive(params, B0;
     criterion = :degree,
     descending = true,
     t = 5000,
-    survival_threshold = 1e-3,
+    survival_threshold = 1e-30,
     show_progress = true,
     debug = false
 )
@@ -219,30 +219,39 @@ function dynamic_extinction_adaptive(params, B0;
     A = params.A
     B = copy(B0)
 
-    # id species roles
-    gen0 = vec(sum(A, dims=2))   # out-degree
+    # --- species roles ---
+    gen0 = vec(sum(A, dims=2))
     basal0 = gen0 .== 0
     consumer0 = gen0 .> 0
 
     alive = trues(S0)
 
+    # --- store networks ---
     Nseq = SpeciesInteractionNetwork[]
+    push!(Nseq, build_network(Matrix(A)))  # include initial state
 
-    # --- FIX: track cumulative primary deletions ---
     primary_counts = Int[0]
 
     prog = show_progress ? Progress(S0, "Dynamic extinctions") : nothing
-
     step = 0
 
-    while true
+    # --- stopping condition (paper-consistent) ---
+    function continue_condition()
+        if criterion == :random_basal
+            return any(alive .& basal0)
+        elseif criterion == :random_consumer
+            return any(alive .& consumer0)
+        else
+            # all trait-based = consumers only
+            return any(alive .& consumer0)
+        end
+    end
+
+    while continue_condition()
         step += 1
 
         alive_idx = findall(alive)
-
-        if isempty(alive_idx)
-            break
-        end
+        isempty(alive_idx) && break
 
         # --- build subnetwork for ranking ---
         A_sub = A[alive_idx, alive_idx]
@@ -255,17 +264,14 @@ function dynamic_extinction_adaptive(params, B0;
         if criterion == :random_basal
             candidates = filter(i -> alive[i] && basal0[i], eachindex(alive))
 
-            isempty(candidates) && break
-            sp = rand(candidates)
-
         elseif criterion == :random_consumer
             candidates = filter(i -> alive[i] && consumer0[i], eachindex(alive))
 
-            isempty(candidates) && break
-            sp = rand(candidates)
-
         else
-            # --- metric-based selection ---
+            # trait-based → consumers only
+            candidates = filter(i -> alive[i] && consumer0[i], eachindex(alive))
+
+            # metric evaluated on alive_idx
             metric = if criterion == :degree
                 deg
             elseif criterion == :generality
@@ -280,52 +286,49 @@ function dynamic_extinction_adaptive(params, B0;
                 error("Unknown criterion: $criterion")
             end
 
-            if metric === nothing
-                local_choice = rand(1:length(alive_idx))
+            if !isempty(candidates)
+                # map candidates to local indices
+                local_inds = findall(i -> alive_idx[i] in candidates, eachindex(alive_idx))
+
+                if metric === nothing
+                    local_choice = rand(local_inds)
+                else
+                    vals = metric[local_inds]
+                    target = descending ? maximum(vals) : minimum(vals)
+                    tied = local_inds[findall(x -> x == target, vals)]
+                    local_choice = rand(tied)
+                end
+
+                sp = alive_idx[local_choice]
             else
-                vals = metric
-                target = descending ? maximum(vals) : minimum(vals)
-                tied = findall(x -> x == target, vals)
-                local_choice = rand(tied)
+                break
             end
-
-            sp = alive_idx[local_choice]
         end
 
-        # quick sanity check
-        if criterion == :random_consumer
-            @assert all(consumer0[candidates])
-        end
+        isempty(candidates) && break
+        sp = rand(candidates)
 
         # --- primary extinction ---
         alive[sp] = false
-
-        # --- FIX: update cumulative primary counts ---
         push!(primary_counts, primary_counts[end] + 1)
 
-        # --- build reduced system for simulation ---
+        # --- simulate ALL remaining species ---
         alive_idx = findall(alive)
-
-        if isempty(alive_idx)
-            break
-        end
+        isempty(alive_idx) && break
 
         A_sim = A[alive_idx, alive_idx]
         B_sim = B[alive_idx]
-        # OG bodymass
         M_sim = params.M[alive_idx]
 
-        # --- build food web without re-randomising ---
         fw = Foodweb(A_sim)
 
-        # --- reuse original body masses ---
         params_sim = default_model(
             fw,
             BodyMass(M_sim),
-            ClassicResponse(; h = 2),
+            ClassicResponse(; h = params.h,
+                             c = params.intraspecific_interference[1]),
         )
 
-        # --- simulate ---
         try
             sol = simulate(params_sim, B_sim, t;
                 show_degenerated = false,
@@ -333,7 +336,6 @@ function dynamic_extinction_adaptive(params, B0;
                     extinction_callback(params_sim, survival_threshold)
                 )
             )
-
             B_sim = sol.u[end]
 
         catch e
@@ -350,17 +352,13 @@ function dynamic_extinction_adaptive(params, B0;
         alive[extinct_now] .= false
         B[extinct_now] .= 0.0
 
-        # --- build output network ---
+        # --- record network ---
         survivors = findall(alive)
-
-        if isempty(survivors)
-            break
-        end
+        isempty(survivors) && break
 
         A_valid = A[survivors, survivors]
         push!(Nseq, build_network(A_valid))
 
-        # --- progress ---
         if show_progress
             next!(prog)
         end
@@ -496,6 +494,10 @@ function extinction_breakdown(result)
     Ns = result.networks
     primary_counts = result.primary
 
+    if isempty(Ns)
+        return NaN   
+    end
+
     n = min(length(Ns), length(primary_counts))
 
     Ns = Ns[1:n]
@@ -547,17 +549,31 @@ function export_curves(curves_dict, type_label, net_id)
 
     for (scenario, c) in curves_dict
 
-        n = length(c.total)
-
-        append!(rows, DataFrame(
-            net_id = fill(net_id, n),
-            type = fill(type_label, n),
-            scenario = fill(scenario, n),
-            step = 1:n,
-            primary = c.primary,
-            secondary = c.secondary,
-            total = c.total
-        ))
+        if !hasproperty(c, :total)
+        
+            rows = DataFrame(
+                net_id = Int[],
+                type = String[],
+                scenario = String[],
+                step = Union{Missing, Int}[],
+                primary = Union{Missing, Float64}[],
+                secondary = Union{Missing, Float64}[],
+                total = Union{Missing, Float64}[]
+            )
+        
+        else
+            n = length(c.total)
+        
+            append!(rows, DataFrame(
+                net_id = fill(net_id, n),
+                type = fill(type_label, n),
+                scenario = fill(scenario, n),
+                step = 1:n,
+                primary = c.primary,
+                secondary = c.secondary,
+                total = c.total
+            ))
+        end
     end
 
     return rows
@@ -592,7 +608,9 @@ R50 is defined as the proportion of species that must be removed
 """
 function robustness_integral(network_sequence::Vector{<:SpeciesInteractionNetwork})
     
-    isempty(network_sequence) && error("network_sequence cannot be empty")
+    if isempty(network_sequence)
+        return NaN   
+    end
 
     S = SpeciesInteractionNetworks.richness.(network_sequence)
     S0 = S[1]
@@ -622,6 +640,16 @@ function robustness_integral(network_sequence::Vector{<:SpeciesInteractionNetwor
         end
     end
 
-    return 0.5
+    return (length(S) - 1) / S0
     
+end
+
+function robustness_auc(network_sequence)
+    S = SpeciesInteractionNetworks.richness.(network_sequence)
+    S0 = S[1]
+
+    frac = S ./ S0
+    x = (0:length(S)-1) ./ S0
+
+    return sum((frac[1:end-1] .+ frac[2:end]) ./ 2 .* diff(x))
 end
