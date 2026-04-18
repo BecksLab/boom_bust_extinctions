@@ -35,22 +35,26 @@ dyn_curve_store  = DataFrame()
 
 # --- Global Params ---
 n_networks = 100                  # number of networks to make
-t = 5000                          # relaxation time after perturbation
-survival_threshold = 1e-3          # extinction threshold
+t = 5000                           # relaxation time after perturbation
+survival_threshold = 1e-30         # extinction threshold
 S_min = 20                         # minimum number spp
-S_max = 60                         # max number spp               
+S_max = 60                         # max number spp
 C_min = 0.05                       # minimum connectance
-C_max = 0.25                       # max connectance      
+C_max = 0.25                       # max connectance
 
-# --- Network param distributions ---
+# --- param distributions ---
 S_dist = truncated(Normal(40, 10), S_min, S_max);
 C_dist = truncated(Normal(0.15, 0.05), C_min, C_max);
+h = truncated(Normal(1.1, 0.5), 0.5, 3.0);
+interference = truncated(Normal(0.1, 0.05), 0.0, 0.3);
 
 for i in 1:n_networks
 
     # --- 1. Sample parameters ---
     S = round(Int, rand(S_dist))
     C = rand(C_dist)
+    hill = rand(h)
+    c = rand(interference)
 
     # --- 2. Build Network ---
     fw = Foodweb(:niche; S, C)
@@ -58,7 +62,7 @@ for i in 1:n_networks
     params = default_model(
         fw,
         BodyMass(; Z = 10),
-        ClassicResponse(; h = 2),
+        ClassicResponse(; h = hill, c = c),
     )
 
     A = params.A
@@ -93,6 +97,10 @@ for i in 1:n_networks
     topo_curves = Dict()
     for (k, v) in topo_results
         topo_curves[k] = extinction_breakdown(v)
+
+        if isempty(v.networks)
+            @warn "Empty sequence for scenario $k in network $i"
+        end
     end
     topo_df = export_curves(topo_curves, "topo", i)
     append!(topo_curve_store, topo_df)
@@ -105,6 +113,10 @@ for i in 1:n_networks
     dyn_curves = Dict()
     for (k, v) in dynamic_results
         dyn_curves[k] = extinction_breakdown(v)
+
+        if isempty(v.networks)
+            @warn "Empty sequence for scenario $k in network $i"
+        end
     end
     dyn_df = export_curves(dyn_curves, "dyn", i)
     append!(dyn_curve_store, dyn_df)
