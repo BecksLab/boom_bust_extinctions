@@ -32,11 +32,12 @@ Random.seed!(66);
 rows = Dict[]
 topo_curve_store = DataFrame()
 dyn_curve_store  = DataFrame()
+species_store = DataFrame()
 
 # --- Global Params ---
-n_networks = 100                  # number of networks to make
+n_networks = 5                  # number of networks to make
 t = 5000                           # relaxation time after perturbation
-survival_threshold = 1e-30         # extinction threshold
+survival_threshold = 1e-12         # extinction threshold
 S_min = 20                         # minimum number spp
 S_max = 60                         # max number spp
 C_min = 0.05                       # minimum connectance
@@ -45,8 +46,8 @@ C_max = 0.25                       # max connectance
 # --- param distributions ---
 S_dist = truncated(Normal(40, 10), S_min, S_max);
 C_dist = truncated(Normal(0.15, 0.05), C_min, C_max);
-h = truncated(Normal(1.1, 0.5), 0.5, 3.0);
-interference = truncated(Normal(0.1, 0.05), 0.0, 0.3);
+h = truncated(Normal(1.1, 0.5), 0.5, 2.0);
+interference = truncated(Normal(0.1, 0.05), 0.0, 0.2);
 
 for i in 1:n_networks
 
@@ -62,11 +63,15 @@ for i in 1:n_networks
     params = default_model(
         fw,
         BodyMass(; Z = 10),
-        ClassicResponse(; h = hill, c = c),
+        ClassicResponse(; 
+            h = hill, 
+            #c = c
+            ),
     )
 
     A = params.A
 
+    # simulate initial biomass
     B0 = rand(Uniform(0.1, 1), S)
 
     # --- 3. Burn-in ---
@@ -87,9 +92,27 @@ for i in 1:n_networks
         continue
     end
 
+    # --- 5. Get species/network stats ---
+    # subset vectors
+    BM = params.M[survivors]
+    TL = params.trophic.levels[survivors]
+    MC = params.metabolic_class[survivors]
+
+    # build species-level dataframe
+    species_df = DataFrame(
+        net_id = fill(i, length(survivors)),
+        species_id = 1:length(survivors),   # reindexed within network
+        original_id = survivors,
+        body_mass = BM,
+        trophic_level = TL,
+        metabolic_class = MC,
+    )
+
+    append!(species_store, species_df)
+
     N = build_network(final_adj_matrix)
 
-    # --- 5. Topological extinctions ---
+    # --- 6. Topological extinctions ---
     topo_results = run_topological_extinctions(N, params)
     # r50
     R_topo = compute_robustness(topo_results)
@@ -105,7 +128,7 @@ for i in 1:n_networks
     topo_df = export_curves(topo_curves, "topo", i)
     append!(topo_curve_store, topo_df)
 
-    # --- 6. Dynamic extinctions ---
+    # --- 7. Dynamic extinctions ---
     dynamic_results = run_dynamic_extinctions(params, final_biomasses)
     # r50
     R_dyn = compute_robustness(dynamic_results)
@@ -121,7 +144,7 @@ for i in 1:n_networks
     dyn_df = export_curves(dyn_curves, "dyn", i)
     append!(dyn_curve_store, dyn_df)
 
-    # --- 7. Build row ---
+    # --- 8. Build row ---
     row = Dict(
         :net_id => i,
         :S => S,
