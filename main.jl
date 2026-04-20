@@ -35,9 +35,9 @@ dyn_curve_store  = DataFrame()
 species_store = DataFrame()
 
 # --- Global Params ---
-n_networks = 5                  # number of networks to make
+n_networks = 10                  # number of networks to make
 t = 5000                           # relaxation time after perturbation
-survival_threshold = 1e-12         # extinction threshold
+survival_threshold = 1e-30         # extinction threshold
 S_min = 20                         # minimum number spp
 S_max = 60                         # max number spp
 C_min = 0.05                       # minimum connectance
@@ -46,8 +46,8 @@ C_max = 0.25                       # max connectance
 # --- param distributions ---
 S_dist = truncated(Normal(40, 10), S_min, S_max);
 C_dist = truncated(Normal(0.15, 0.05), C_min, C_max);
-h = truncated(Normal(1.1, 0.5), 0.5, 2.0);
-interference = truncated(Normal(0.1, 0.05), 0.0, 0.2);
+h = truncated(Normal(1.1, 0.5), 0.9, 2.0);
+interference = truncated(Normal(0.1, 0.05), 0.0, 0.15);
 
 for i in 1:n_networks
 
@@ -64,7 +64,7 @@ for i in 1:n_networks
         fw,
         BodyMass(; Z = 10),
         ClassicResponse(; 
-            h = hill, 
+            h = 2.0, 
             #c = c
             ),
     )
@@ -175,3 +175,4 @@ all_curve_df = vcat(topo_curve_store, dyn_curve_store)
 # Write files
 CSV.write("outputs/robustness_summaries.csv", results_df)
 CSV.write("outputs/extinction_curves.csv", all_curve_df)
+CSV.write("outputs/species_metadata.csv", species_store)
