@@ -28,3 +28,4 @@ LocalPreferences.toml
 JuliaLocalPreferences.toml
 .vscode/settings.json
 .Rproj.user
+.DS_Store
