@@ -9,12 +9,12 @@ df <- read.csv("outputs/robustness_summaries.csv") %>%
     names_pattern = "^(topo|dyn)_(.*)$")
 
 ggplot(df) +
-  geom_abline(slope = 1,
-              colour = "#A6192E") +
   geom_point(aes(x = topo,
                  y = dyn),
              alpha = 0.6,
              colour = "#EAAA00") +
+  geom_abline(slope = 1,
+              colour = "#A6192E") +
   facet_wrap(vars(scenario)) +
   xlim(0,0.5) +
   theme_classic()
@@ -44,23 +44,25 @@ ggplot(curves_df) +
   geom_point(aes(x = primary,
                  y = secondary,
                  colour = type),
-             alpha = 0.1,
+             alpha = 0.2,
              shape = 15,
              size = 0.5) +
   scale_colour_manual(values = c("topo" = "#046A38", "dyn" = "#FFB81C")) +
+  guides(
+    color = guide_legend(
+      label.position = "top",
+      override.aes = list(shape = 15, size = 5, alpha = 1)
+    )
+  ) +
   facet_wrap(vars(scenario)) +
   ylim(0, 1) + 
   theme_classic()
 
-curves_df %>%
-  left_join(df) %>%
-  yeet(secondary < 0) %>%
-  distinct(net_id)
-
-curves_df %>% yeet(type == "dyn")
-
-df %>% yeet(dyn > 0.6)
-
-df %>% yeet(topo > 0.6)
+df %>%
+  squad_up(scenario) %>%
+  no_cap(mean_topo = mean(topo, na.rm = TRUE),
+         mean_dynam = mean(dyn, na.rm = TRUE),
+         mean_C = mean(C),
+         mean_S = mean(S))
 
 summary(df)
