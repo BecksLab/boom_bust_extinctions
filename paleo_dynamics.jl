@@ -209,6 +209,6 @@ results_df = DataFrame(rows)
 all_curve_df = vcat(topo_curve_store, dyn_curve_store)
 
 # Write files
-CSV.write("outputs/meishan_robustness_summaries.csv", results_df)
-CSV.write("outputs/meishan_extinction_curves.csv", all_curve_df)
-CSV.write("outputs/meishan_species_metadata.csv", species_store)
+CSV.write("outputs/paleo_robustness_summaries.csv", results_df)
+CSV.write("outputs/paleo_extinction_curves.csv", all_curve_df)
+CSV.write("outputs/paleo_species_metadata.csv", species_store)
