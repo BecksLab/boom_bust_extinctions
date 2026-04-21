@@ -27,5 +27,13 @@ Manifest*.toml
 LocalPreferences.toml
 JuliaLocalPreferences.toml
 .vscode/settings.json
-.Rproj.user
+
+# MacOS nonsense
 .DS_Store
+
+# R
+code/.Rhistory
+.Rproj.user
+.Rhistory
+.Rapp.history
+.RData
