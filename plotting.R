@@ -66,3 +66,5 @@ df %>%
          mean_S = mean(S))
 
 summary(df)
+
+spp_df <- read.csv("outputs/species_metadata.csv")

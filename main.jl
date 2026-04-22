@@ -35,7 +35,7 @@ dyn_curve_store  = DataFrame()
 species_store = DataFrame()
 
 # --- Global Params ---
-n_networks = 10                  # number of networks to make
+n_networks = 1000                  # number of networks to make
 t = 5000                           # relaxation time after perturbation
 survival_threshold = 1e-30         # extinction threshold
 S_min = 20                         # minimum number spp
@@ -147,8 +147,8 @@ for i in 1:n_networks
     # --- 8. Build row ---
     row = Dict(
         :net_id => i,
-        :S => S,
-        :C => C,
+        :S => length(survivors),
+        :C => sum(final_adj_matrix) / (length(survivors)^2),
     )
 
     # --- Add topological results ---
