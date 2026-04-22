@@ -209,7 +209,7 @@ function dynamic_extinction_adaptive(params, B0;
     criterion = :degree,
     descending = true,
     t = 5000,
-    survival_threshold = 1e-30,
+    survival_threshold = 1e-12,
     show_progress = true,
     debug = false
 )
@@ -235,7 +235,7 @@ function dynamic_extinction_adaptive(params, B0;
     prog = show_progress ? Progress(S0, "Dynamic extinctions") : nothing
     step = 0
 
-    # --- stopping condition (paper-consistent) ---
+    # --- stopping condition ---
     function continue_condition()
         if criterion == :random_basal
             return any(alive .& basal0)
@@ -325,8 +325,10 @@ function dynamic_extinction_adaptive(params, B0;
         params_sim = default_model(
             fw,
             BodyMass(M_sim),
-            ClassicResponse(; h = params.h,
-                             c = params.intraspecific_interference[1]),
+            ClassicResponse(; 
+                            h = params.h,
+                            #c = params.intraspecific_interference[1],
+                            ),
         )
 
         try
@@ -652,4 +654,18 @@ function robustness_auc(network_sequence)
     x = (0:length(S)-1) ./ S0
 
     return sum((frac[1:end-1] .+ frac[2:end]) ./ 2 .* diff(x))
+end
+
+function compute_trophic_levels(A)
+    
+    S = size(A, 1) # Species richness.
+    out_degree = sum(A; dims = 2)
+    D = -(A ./ out_degree) # Diet matrix.
+    D[isnan.(D)] .= 0.0
+    D[diagind(D)] .= 1.0 .- D[diagind(D)]
+    # Solve with the inverse matrix.
+    inverse = iszero(det(D)) ? pinv : inv
+    tls = inverse(D) * ones(S)
+
+    return tls
 end
