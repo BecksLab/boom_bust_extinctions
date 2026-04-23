@@ -40,7 +40,7 @@ traits = CSV.read("data/community.csv", DataFrame)
 feeding_rules = CSV.read("data/feeding_rules.csv", DataFrame)
 
 # --- Global Params ---
-n_networks = 10                  # number of networks to make
+n_networks = 20                  # number of networks to make
 t = 5000                           # relaxation time after perturbation
 survival_threshold = 1e-12         # extinction threshold
 
@@ -61,7 +61,7 @@ for i in 1:n_networks
 
     traits[!, :bodymass] = bodysize
 
-    # --- 2. Build the 4 PFIM networks ---
+    # --- 2. Build the 4 PFIM (+ Niche) networks ---
     mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
     pfim_meta = PFIM(traits, feeding_rules; return_type = :matrix)
@@ -78,13 +78,20 @@ for i in 1:n_networks
                                     size_col = :bodymass,
                                     num_size_rule = mass_rule, 
                                     y = 30.0, downsample = true)
+    # for fun we can build a niche model (lets use pfim metweb as params)
+    S = size(pfim_meta, 1)
+    L = sum(pfim_meta)
+    C = L / S^2
+    niche_fw = Foodweb(:niche; S, C)
+    niche = Matrix(niche_fw.A)
 
     # Put them in a structured container
     networks = Dict(
         "meta" => pfim_meta,
         "down" => pfim_downsample,
         "meta_size" => pfim_meta_contsize,
-        "down_size" => pfim_downsample_contsize
+        "down_size" => pfim_downsample_contsize,
+        "niche" => niche
     )
 
     # --- 3. Run sims per a network type ---
@@ -94,22 +101,35 @@ for i in 1:n_networks
         fw = Foodweb(A)
         S = size(A, 1)
 
-        # body sizes aligned with network ordering
-        size_by_index = zeros(Float64, S)
+        if net_name == "niche"
 
-        for (sp, idx) in sp_index
-            match = findfirst(==(sp), traits.species)
-            if match !== nothing
-                size_by_index[idx] = traits.bodymass[match]
+            # model params - use standard bodysize scaling
+            params = default_model(
+                fw,
+                BodyMass(; Z = 10),
+                ClassicResponse(; h = 2.0),
+            )
+
+        else
+
+           # body sizes aligned with network ordering
+            size_by_index = zeros(Float64, S)
+
+            for (sp, idx) in sp_index
+                match = findfirst(==(sp), traits.species)
+                if match !== nothing
+                    size_by_index[idx] = traits.bodymass[match]
+                end
             end
-        end
 
-        # model params
-        params = default_model(
-            fw,
-            BodyMass(size_by_index),
-            ClassicResponse(; h = 2.0),
-        )
+            # model params
+            params = default_model(
+                fw,
+                BodyMass(size_by_index),
+                ClassicResponse(; h = 2.0),
+            )
+            
+        end
 
         A = params.A
 
