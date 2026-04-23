@@ -17,6 +17,7 @@ using Distributions
 using EcologicalNetworksDynamics
 using Extinctions
 using JLD2
+using pfim
 using ProgressMeter
 using SpeciesInteractionNetworks
 using Statistics
@@ -35,171 +36,166 @@ dyn_curve_store  = DataFrame()
 species_store = DataFrame()
 
 # import dataframes
-traits = CSV.read("data/traits.csv", DataFrame)
-edges = CSV.read("data/edgelist.csv", DataFrame)
+traits = CSV.read("data/community.csv", DataFrame)
+feeding_rules = CSV.read("data/feeding_rules.csv", DataFrame)
 
 # --- Global Params ---
 n_networks = 10                  # number of networks to make
 t = 5000                           # relaxation time after perturbation
 survival_threshold = 1e-12         # extinction threshold
 
-# --- Build food web from edgelist ---
-
-species = unique(vcat(edges.taxon_resource, edges.taxon_consumer))
-S = length(species)
-
-sp_index = Dict(sp => i for (i, sp) in enumerate(species))
-
-A = zeros(Int64, S, S)
-
-for row in eachrow(edges)
-    i = sp_index[row.taxon_resource]
-    j = sp_index[row.taxon_consumer]
-    A[i, j] = 1.0
-end
-
-# --- Define size classes ---
-size_map = Dict(row.species => row.size for row in eachrow(traits))
-
-size_ranges = Dict(
-    "tiny" => (-12.0, -8.0),
-    "small" => (-8.0, -4.0),
-    "medium" => (-4.0, 0.0),
-    "large" => (0.0, 4.0)
-)
-
 for i in 1:n_networks
 
-    # --- 1. Build Network ---
-    fw = Foodweb(A)
+    # --- 1. Assign body sizes ---
+    y = collect(String, traits.size)
 
-    S = size(A, 1)
+    bodysize = (
+        y ->
+            y == "tiny" ? rand(Uniform(0.1, 10.0)) :
+            y == "small" ? rand(Uniform(10.0, 50.0)) :
+            y == "medium" ? rand(Uniform(50.0, 100.0)) :
+            y == "large" ? rand(Uniform(100.0, 300.0)) :
+            y == "very_large" ? rand(Uniform(300.0, 500.0)) :
+            y == "gigantic" ? rand(Uniform(500.0, 700.0)) : y
+    ).(y)
 
-    # --- 2. Simulate body sizes ---
-    TL = compute_trophic_levels(A)
+    traits[!, :bodymass] = bodysize
 
-    logM = zeros(S)
+    # --- 2. Build the 4 PFIM networks ---
+    mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
-    β = 1.0          # trophic scaling (~10x per level)
-    σ = 0.5          # noise
+    pfim_meta = PFIM(traits, feeding_rules; return_type = :matrix)
+    pfim_downsample = PFIM(traits, feeding_rules; 
+                           return_type = :matrix, y = 30.0, downsample = true)
 
-    for (sp, i) in sp_index
-        TL_i = TL[i]
-        cls = size_map[sp]
+    pfim_meta_contsize = PFIM(traits, feeding_rules; 
+                              return_type = :matrix,
+                              size_col = :bodymass,
+                              num_size_rule = mass_rule)
 
-        lo, hi = size_ranges[cls]
-        μ = (lo + hi) / 2
+    pfim_downsample_contsize = PFIM(traits, feeding_rules; 
+                                    return_type = :matrix,
+                                    size_col = :bodymass,
+                                    num_size_rule = mass_rule, 
+                                    y = 30.0, downsample = true)
 
-        logM[i] = clamp(
-                        μ + β * (TL_i - 1) + rand(Normal(0, σ)),
-                        lo, hi
-                    )
-    end
-
-    M = 10 .^ logM
-
-    # feed into the params df
-    params = default_model(
-        fw,
-        BodyMass(M),
-        ClassicResponse(;h = 2.0),
+    # Put them in a structured container
+    networks = Dict(
+        "meta" => pfim_meta,
+        "down" => pfim_downsample,
+        "meta_size" => pfim_meta_contsize,
+        "down_size" => pfim_downsample_contsize
     )
 
-    A = params.A
+    # --- 3. Run sims per a network type ---
+    for (net_name, pfim_net) in networks
 
-    # simulate initial biomass
-    B0 = rand(Uniform(0.1, 1), S)
+        A = pfim_net
+        fw = Foodweb(A)
+        S = size(A, 1)
 
-    # --- 3. Burn-in ---
-    sol = simulate(params, B0, t;
-        show_degenerated = false,
-        callback = CallbackSet(
-            extinction_callback(params, survival_threshold)
+        # body sizes aligned with network ordering
+        size_by_index = zeros(Float64, S)
+
+        for (sp, idx) in sp_index
+            match = findfirst(==(sp), traits.species)
+            if match !== nothing
+                size_by_index[idx] = traits.bodymass[match]
+            end
+        end
+
+        # model params
+        params = default_model(
+            fw,
+            BodyMass(size_by_index),
+            ClassicResponse(; h = 2.0),
         )
-    )
 
-    final_biomasses = sol.u[end]
+        A = params.A
 
-    # --- 4. Extract valid network ---
-    survivors, final_adj_matrix = extract_valid_network(A, final_biomasses, survival_threshold)
+        # initial biomass
+        B0 = rand(Uniform(0.1, 1), S)
 
-    if survivors === nothing
-        @warn "All species extinct after burn-in, skipping network $i"
-        continue
-    end
+        # --- 4. Burn-in ---
+        sol = simulate(params, B0, t;
+            show_degenerated = false,
+            callback = CallbackSet(
+                extinction_callback(params, survival_threshold)
+            )
+        )
 
-    # --- 5. Get species/network stats ---
-    # subset vectors
-    BM = params.M[survivors]
-    TL = params.trophic.levels[survivors]
-    MC = params.metabolic_class[survivors]
+        final_biomasses = sol.u[end]
 
-    # build species-level dataframe
-    species_df = DataFrame(
-        net_id = fill(i, length(survivors)),
-        species_id = 1:length(survivors),   # reindexed within network
-        original_id = survivors,
-        body_mass = BM,
-        trophic_level = TL,
-        metabolic_class = MC,
-    )
+        # --- 5. prune network ---
+        survivors, final_adj_matrix =
+            extract_valid_network(A, final_biomasses, survival_threshold)
 
-    append!(species_store, species_df)
-
-    N = build_network(final_adj_matrix)
-
-    # --- 6. Topological extinctions ---
-    topo_results = run_topological_extinctions(N, params)
-    # r50
-    R_topo = compute_robustness(topo_results)
-    # get extinction curves
-    topo_curves = Dict()
-    for (k, v) in topo_results
-        topo_curves[k] = extinction_breakdown(v)
-
-        if isempty(v.networks)
-            @warn "Empty sequence for scenario $k in network $i"
+        if survivors === nothing
+            @warn "All extinct: network $i ($net_name)"
+            continue
         end
-    end
-    topo_df = export_curves(topo_curves, "topo", i)
-    append!(topo_curve_store, topo_df)
 
-    # --- 7. Dynamic extinctions ---
-    dynamic_results = run_dynamic_extinctions(params, final_biomasses)
-    # r50
-    R_dyn = compute_robustness(dynamic_results)
-    # get extinction curves
-    dyn_curves = Dict()
-    for (k, v) in dynamic_results
-        dyn_curves[k] = extinction_breakdown(v)
+        # --- 6. species stats ---
+        BM = params.M[survivors]
+        TL = params.trophic.levels[survivors]
+        MC = params.metabolic_class[survivors]
 
-        if isempty(v.networks)
-            @warn "Empty sequence for scenario $k in network $i"
+        species_df = DataFrame(
+            net_id = fill(i, length(survivors)),
+            net_type = fill(net_name, length(survivors)),
+            species_id = 1:length(survivors),
+            original_id = survivors,
+            body_mass = BM,
+            trophic_level = TL,
+            metabolic_class = MC,
+        )
+
+        append!(species_store, species_df)
+
+        N = build_network(final_adj_matrix)
+
+        # --- 7. Topological extinctions ---
+        topo_results = run_topological_extinctions(N, params)
+        R_topo = compute_robustness(topo_results)
+
+        topo_curves = Dict()
+        for (k, v) in topo_results
+            topo_curves[k] = extinction_breakdown(v)
         end
+
+        topo_df = export_curves(topo_curves, "topo_$net_name", i)
+        append!(topo_curve_store, topo_df)
+
+        # --- 8. dynamic extinctions ---
+        dynamic_results = run_dynamic_extinctions(params, final_biomasses)
+        R_dyn = compute_robustness(dynamic_results)
+
+        dyn_curves = Dict()
+        for (k, v) in dynamic_results
+            dyn_curves[k] = extinction_breakdown(v)
+        end
+
+        dyn_df = export_curves(dyn_curves, "dyn_$net_name", i)
+        append!(dyn_curve_store, dyn_df)
+
+        # --- 9. summary row ---
+        row = Dict(
+            :net_id => i,
+            :net_type => net_name,
+            :S => length(survivors),
+            :C => sum(final_adj_matrix) / (length(survivors)^2),
+        )
+
+        for (k, v) in R_topo
+            row[Symbol("topo_" * k)] = v
+        end
+
+        for (k, v) in R_dyn
+            row[Symbol("dyn_" * k)] = v
+        end
+
+        push!(rows, row)
     end
-    dyn_df = export_curves(dyn_curves, "dyn", i)
-    append!(dyn_curve_store, dyn_df)
-
-    # --- 8. Build row ---
-    row = Dict(
-        :net_id => i,
-        :S => S,
-        :C => sum(A) / (S^2),
-    )
-
-    # --- Add topological results ---
-    for (k, v) in R_topo
-        row[Symbol("topo_" * k)] = v
-    end
-
-    # --- Add dynamic results ---
-    for (k, v) in R_dyn
-        row[Symbol("dyn_" * k)] = v
-    end
-
-    # --- Append to row dict ---
-    push!(rows, row)
-
 end
 
 # create data frame object
