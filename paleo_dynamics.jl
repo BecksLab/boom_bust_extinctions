@@ -24,6 +24,7 @@ using Statistics
 
 # call internal functions
 include("src/internals.jl")
+include("src/adbm.jl")
 
 # set seed
 import Random
@@ -40,7 +41,7 @@ traits = CSV.read("data/community.csv", DataFrame)
 feeding_rules = CSV.read("data/feeding_rules.csv", DataFrame)
 
 # --- Global Params ---
-n_networks = 20                  # number of networks to make
+n_networks = 2                  # number of networks to make
 t = 5000                           # relaxation time after perturbation
 survival_threshold = 1e-12         # extinction threshold
 
@@ -61,6 +62,9 @@ for i in 1:n_networks
 
     traits[!, :bodymass] = bodysize
 
+    # Estimate biomass using Metabolic Theory scaling (M^-3/4)
+    biomass = bodysize .^ (-3 / 4)
+
     # --- 2. Build the 4 PFIM (+ Niche) networks ---
     mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
@@ -78,6 +82,11 @@ for i in 1:n_networks
                                     size_col = :bodymass,
                                     num_size_rule = mass_rule, 
                                     y = 30.0, downsample = true)
+
+    parameters = adbm_parameters(traits, bodysize)
+    N = adbmmodel(traits, parameters, biomass)
+    adbm = Matrix(N.edges.edges)
+
     # for fun we can build a niche model (lets use pfim metweb as params)
     S = size(pfim_meta, 1)
     L = sum(pfim_meta)
@@ -91,7 +100,8 @@ for i in 1:n_networks
         "down" => pfim_downsample,
         "meta_size" => pfim_meta_contsize,
         "down_size" => pfim_downsample_contsize,
-        "niche" => niche
+        "niche" => niche,
+        "ADBM" => adbm
     )
 
     # --- 3. Run sims per a network type ---
@@ -101,7 +111,7 @@ for i in 1:n_networks
         fw = Foodweb(A)
         S = size(A, 1)
 
-        if net_name == "niche"
+        if net_name ∈ ["niche", "meta", "down", "ADBM"]
 
             # model params - use standard bodysize scaling
             params = default_model(
