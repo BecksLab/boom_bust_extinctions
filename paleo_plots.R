@@ -24,12 +24,12 @@ ggplot(df) +
 ggplot(df %>%
          pivot_longer(-c(net_id, S, C, scenario, net_type),
                       names_to = "extinction")) +
-  geom_boxplot(aes(y = scenario,
+  geom_boxplot(aes(y = net_type,
                    x = value,
                    colour = extinction)) +
   scale_colour_manual(values = c("topo" = "#046A38", "dyn" = "#FFB81C")) +
   coord_flip()+
-  facet_grid(cols = vars(net_type)) +
+  facet_wrap(vars(scenario)) +
   theme_classic() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
