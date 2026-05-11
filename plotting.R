@@ -44,7 +44,7 @@ ggplot(curves_df) +
   geom_point(aes(x = primary,
                  y = secondary,
                  colour = type),
-             alpha = 0.1,
+             alpha = 0.3,
              shape = 15,
              size = 0.5) +
   scale_colour_manual(values = c("topo" = "#046A38", "dyn" = "#FFB81C")) +
