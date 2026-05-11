@@ -52,7 +52,7 @@ for i in 1:n_networks
 
     # Global body-size distribution
     global_dist = LogNormal(log(30), 1.5)
-    # median ≈ 50
+    # median ≈ 30
     # sigma controls spread/right-tail
 
     # Category bounds
@@ -82,37 +82,29 @@ for i in 1:n_networks
     # --- 2. Build the 4 PFIM (+ Niche) networks ---
     mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
-    #pfim_meta = PFIM(traits, feeding_rules; return_type = :matrix)
     pfim_downsample = PFIM(traits, feeding_rules; 
-                           return_type = :matrix, y = 30.0, downsample = true)
+                           return_type = :matrix, y = 15.0, downsample = true)
 
-    pfim_meta_contsize = PFIM(traits, feeding_rules; 
-                              return_type = :matrix,
-                              size_col = :bodymass,
-                              num_size_rule = mass_rule)
-
-    #pfim_downsample_contsize = PFIM(traits, feeding_rules; 
-    #                                return_type = :matrix,
-    #                                size_col = :bodymass,
-    #                                num_size_rule = mass_rule, 
-    #                                y = 30.0, downsample = true)
+    pfim_downsample_contsize = PFIM(traits, feeding_rules; 
+                                    return_type = :matrix,
+                                    size_col = :bodymass,
+                                    num_size_rule = mass_rule, 
+                                    y = 15.0, downsample = true)
 
     parameters = adbm_parameters(traits, bodysize)
     N = adbmmodel(traits, parameters, biomass)
     adbm = Matrix(N.edges.edges)
 
     # for fun we can build a niche model (lets use pfim metweb as params)
-    S = size(pfim_meta, 1)
-    L = sum(pfim_meta)
+    S = size(pfim_downsample, 1)
+    L = sum(pfim_downsample)
     C = L / S^2
     niche_fw = Foodweb(:niche; S, C)
     niche = Matrix(niche_fw.A)
 
     # Put them in a structured container
     networks = Dict(
-        #"meta" => pfim_meta,
         "down" => pfim_downsample,
-        #"meta_size" => pfim_meta_contsize,
         "down_size" => pfim_downsample_contsize,
         "niche" => niche,
         "ADBM" => adbm
