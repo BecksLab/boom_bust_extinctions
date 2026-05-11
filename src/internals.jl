@@ -669,3 +669,190 @@ function compute_trophic_levels(A)
 
     return tls
 end
+
+function realise_network(
+    A;
+    bodymasses = nothing,
+    t = 5000,
+    threshold = 1e-12
+)
+
+    fw = Foodweb(A)
+
+    if isnothing(bodymasses)
+
+        params = default_model(
+            fw,
+            BodyMass(; Z = 10),
+            ClassicResponse(; h = 2.0),
+        )
+
+    else
+
+        params = default_model(
+            fw,
+            BodyMass(bodymasses),
+            ClassicResponse(; h = 2.0),
+        )
+
+    end
+
+    S = size(A, 1)
+
+    B0 = rand(Uniform(0.1, 1), S)
+
+    sol = simulate(
+        params,
+        B0,
+        t;
+        show_degenerated = false,
+        callback = CallbackSet(
+            extinction_callback(params, threshold)
+        )
+    )
+
+    final_biomasses = sol.u[end]
+
+    survivors, final_adj =
+        extract_valid_network(
+            params.A,
+            final_biomasses,
+            threshold
+        )
+
+    survivors === nothing && return nothing
+
+    S_real = length(survivors)
+    L_real = sum(final_adj)
+    C_real = L_real / S_real^2
+
+    return (
+        A = final_adj,
+        params = params,
+        biomasses = final_biomasses,
+        survivors = survivors,
+        S = S_real,
+        L = L_real,
+        C = C_real
+    )
+end
+
+function topology_distance(x, target_S, target_C)
+
+    dS = (x.S - target_S) / target_S
+    dC = (x.C - target_C) / target_C
+
+    return sqrt(dS^2 + dC^2)
+end
+
+function is_acceptable_match(
+    realised,
+    target_S,
+    target_C;
+    S_tol = 2,
+    C_tol = 0.02
+)
+
+    return (
+        abs(realised.S - target_S) <= S_tol &&
+        abs(realised.C - target_C) <= C_tol
+    )
+end
+
+function find_matching_network(
+    generator_function,
+    target_S,
+    target_C;
+    max_attempts = 1000,
+    S_tol = 2,
+    C_tol = 0.02
+)
+
+    best_candidate = nothing
+    best_distance = Inf
+
+    for attempt in 1:max_attempts
+
+        realised = generator_function()
+
+        realised === nothing && continue
+
+        # Exact-ish acceptance
+        if is_acceptable_match(
+            realised,
+            target_S,
+            target_C;
+            S_tol = S_tol,
+            C_tol = C_tol
+        )
+
+            println("Accepted match after $attempt attempts")
+
+            return realised
+        end
+
+        # Keep nearest candidate as fallback
+        d = topology_distance(
+            realised,
+            target_S,
+            target_C
+        )
+
+        if d < best_distance
+            best_distance = d
+            best_candidate = realised
+        end
+    end
+
+    println("No acceptable match found.")
+    println("Returning nearest candidate.")
+
+    return best_candidate
+end
+
+function generate_niche_network(
+    S_init,
+    C_init,
+    t,
+    survival_threshold
+)
+
+    niche_fw = Foodweb(
+        :niche;
+        S = S_init,
+        C = C_init
+    )
+
+    niche_A = Matrix(niche_fw.A)
+
+    return realise_network(
+        niche_A;
+        t = t,
+        threshold = survival_threshold
+    )
+end
+
+function generate_adbm_network(
+    traits,
+    bodysize,
+    biomass,
+    t,
+    survival_threshold
+)
+
+    parameters = adbm_parameters(traits, bodysize)
+
+    N = adbmmodel(
+        traits,
+        parameters,
+        biomass
+    )
+
+    adbm_A = Matrix(N.edges.edges)
+
+    return realise_network(
+        adbm_A;
+        t = t,
+        threshold = survival_threshold
+    )
+end

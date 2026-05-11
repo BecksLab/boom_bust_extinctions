@@ -45,6 +45,11 @@ n_networks = 2                  # number of networks to make
 t = 5000                           # relaxation time after perturbation
 survival_threshold = 1e-12         # extinction threshold
 
+# --- Pruning Params ---
+n_candidates = 5
+S_tolerance = 4
+C_tolerance = 0.1
+
 for i in 1:n_networks
 
     # --- 1. Assign body sizes ---
@@ -79,100 +84,169 @@ for i in 1:n_networks
     # Estimate biomass using Metabolic Theory scaling (M^-3/4)
     biomass = bodysize .^ (-3 / 4)
 
-    # --- 2. Build the 4 PFIM (+ Niche) networks ---
+    # --- 2. Generate PFIM reference networks ---
+
     mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
-    pfim_downsample = PFIM(traits, feeding_rules; 
-                           return_type = :matrix, y = 15.0, downsample = true)
-
-    pfim_downsample_contsize = PFIM(traits, feeding_rules; 
-                                    return_type = :matrix,
-                                    size_col = :bodymass,
-                                    num_size_rule = mass_rule, 
-                                    y = 15.0, downsample = true)
-
-    parameters = adbm_parameters(traits, bodysize)
-    N = adbmmodel(traits, parameters, biomass)
-    adbm = Matrix(N.edges.edges)
-
-    # for fun we can build a niche model (lets use pfim metweb as params)
-    S = size(pfim_downsample, 1)
-    L = sum(pfim_downsample)
-    C = L / S^2
-    niche_fw = Foodweb(:niche; S, C)
-    niche = Matrix(niche_fw.A)
-
-    # Put them in a structured container
-    networks = Dict(
-        "down" => pfim_downsample,
-        "down_size" => pfim_downsample_contsize,
-        "niche" => niche,
-        "ADBM" => adbm
+    pfim_downsample = PFIM(
+        traits,
+        feeding_rules;
+        return_type = :matrix,
+        y = 30.0,
+        downsample = true
     )
 
-    # --- 3. Run sims per a network type ---
-    for (net_name, pfim_net) in networks
+    pfim_downsample_contsize = PFIM(
+        traits,
+        feeding_rules;
+        return_type = :matrix,
+        size_col = :bodymass,
+        num_size_rule = mass_rule,
+        y = 30.0,
+        downsample = true
+    )
 
-        A = pfim_net
-        fw = Foodweb(A)
-        S = size(A, 1)
+    # --- 3. Realise PFIM networks ---
 
-        if net_name ∈ ["niche",
-                       #"meta", 
-                       "down", 
-                       "ADBM"]
+    realised_networks = Dict()
 
-            # model params - use standard bodysize scaling
-            params = default_model(
-                fw,
-                BodyMass(; Z = 10),
-                ClassicResponse(; h = 2.0),
+    # PFIM without explicit body sizes
+    pfim_realised = realise_network(
+        pfim_downsample;
+        t = t,
+        threshold = survival_threshold
+    )
+
+    if pfim_realised !== nothing
+        realised_networks["down"] = pfim_realised
+    end
+
+    # PFIM with continuous body sizes
+    pfim_size_realised = realise_network(
+        pfim_downsample_contsize;
+        bodymasses = bodysize,
+        t = t,
+        threshold = survival_threshold
+    )
+
+    if pfim_size_realised !== nothing
+        realised_networks["down_size"] = pfim_size_realised
+    end
+
+    # --- 4. Select ecological reference network ---
+
+    # Use size-structured PFIM as ecological target
+
+    reference_name = "down_size"
+    reference_net = realised_networks[reference_name]
+
+    target_S = reference_net.S
+    target_C = reference_net.C
+
+    println("\n=================================================")
+    println("Ecological reference: $reference_name")
+    println("=================================================")
+
+    println("Target realised richness: $target_S")
+    println("Target realised connectance: $target_C")
+
+    # Estimate generation parameters
+
+    # Burn-in generally reduces richness/connectance
+
+    S_generate = target_S + 5
+    C_generate = target_C * 1.2
+
+    # Generate matched niche network
+
+    println("\nSearching for matching niche network...")
+
+    best_niche = find_matching_network(
+
+        () -> begin
+
+            niche_fw = Foodweb(
+                :niche;
+                S = S_generate,
+                C = C_generate
             )
 
-        else
+            niche_A = Matrix(niche_fw.A)
 
-           # body sizes aligned with network ordering
-            size_by_index = zeros(Float64, S)
-
-            for (sp, idx) in sp_index
-                match = findfirst(==(sp), traits.species)
-                if match !== nothing
-                    size_by_index[idx] = traits.bodymass[match]
-                end
-            end
-
-            # model params
-            params = default_model(
-                fw,
-                BodyMass(size_by_index),
-                ClassicResponse(; h = 2.0),
+            realise_network(
+                niche_A;
+                t = t,
+                threshold = survival_threshold
             )
-            
-        end
 
-        A = params.A
+        end,
 
-        # initial biomass
-        B0 = rand(Uniform(0.1, 1), S)
+        target_S,
+        target_C;
 
-        # --- 4. Burn-in ---
-        sol = simulate(params, B0, t;
-            show_degenerated = false,
-            callback = CallbackSet(
-                extinction_callback(params, survival_threshold)
+        max_attempts = n_candidates,
+        S_tol = S_tolerance,
+        C_tol = C_tolerance
+    )
+
+    # Generate matched ADBM network
+
+    println("\nSearching for matching ADBM network...")
+
+    best_adbm = find_matching_network(
+
+        () -> begin
+
+            parameters = adbm_parameters(
+                traits,
+                bodysize
             )
-        )
 
-        final_biomasses = sol.u[end]
+            N = adbmmodel(
+                traits,
+                parameters,
+                biomass
+            )
 
-        # --- 5. prune network ---
-        survivors, final_adj_matrix =
-            extract_valid_network(A, final_biomasses, survival_threshold)
+            adbm_A = Matrix(N.edges.edges)
 
-        if survivors === nothing
-            @warn "All extinct: network $i ($net_name)"
-            continue
-        end
+            realise_network(
+                adbm_A;
+                t = t,
+                threshold = survival_threshold
+            )
+
+        end,
+
+        target_S,
+        target_C;
+
+        max_attempts = n_candidates,
+        S_tol = S_tolerance,
+        C_tol = C_tolerance
+    )
+
+    # Final network collection
+
+    matched_networks = Dict(
+
+        "down" => realised_networks["down"],
+        "down_size" => realised_networks["down_size"],
+        "niche" => best_niche,
+        "ADBM" => best_adbm
+    )
+
+    # --- 5. Run sims per a network type ---
+    for (net_name, realised) in matched_networks
+
+        A = realised.A
+        params = realised.params
+        final_biomasses = realised.biomasses
+        survivors = realised.survivors
+
+        final_adj_matrix = realised.A
+
+        N = build_network(final_adj_matrix)
 
         # --- 6. species stats ---
         BM = params.M[survivors]
@@ -190,8 +264,6 @@ for i in 1:n_networks
         )
 
         append!(species_store, species_df)
-
-        N = build_network(final_adj_matrix)
 
         # --- 7. Topological extinctions ---
         topo_results = run_topological_extinctions(N, params)
