@@ -50,15 +50,29 @@ for i in 1:n_networks
     # --- 1. Assign body sizes ---
     y = collect(String, traits.size)
 
-    bodysize = (
-        y ->
-            y == "tiny" ? rand(Uniform(0.1, 10.0)) :
-            y == "small" ? rand(Uniform(10.0, 50.0)) :
-            y == "medium" ? rand(Uniform(50.0, 100.0)) :
-            y == "large" ? rand(Uniform(100.0, 300.0)) :
-            y == "very_large" ? rand(Uniform(300.0, 500.0)) :
-            y == "gigantic" ? rand(Uniform(500.0, 700.0)) : y
-    ).(y)
+    # Global body-size distribution
+    global_dist = LogNormal(log(30), 1.5)
+    # median ≈ 50
+    # sigma controls spread/right-tail
+
+    # Category bounds
+    size_bounds = Dict(
+        "tiny"       => (0.1, 10.0),
+        "small"      => (10.0, 50.0),
+        "medium"     => (50.0, 100.0),
+        "large"      => (100.0, 300.0),
+        "very_large" => (300.0, 500.0),
+        "gigantic"   => (500.0, Inf)
+    )
+
+    # Sample from truncated log-normal
+    bodysize = [
+        begin
+            lo, hi = size_bounds[s]
+            rand(truncated(global_dist, lo, hi))
+        end
+        for s in y
+    ]
 
     traits[!, :bodymass] = bodysize
 
@@ -68,7 +82,7 @@ for i in 1:n_networks
     # --- 2. Build the 4 PFIM (+ Niche) networks ---
     mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
-    pfim_meta = PFIM(traits, feeding_rules; return_type = :matrix)
+    #pfim_meta = PFIM(traits, feeding_rules; return_type = :matrix)
     pfim_downsample = PFIM(traits, feeding_rules; 
                            return_type = :matrix, y = 30.0, downsample = true)
 
@@ -77,11 +91,11 @@ for i in 1:n_networks
                               size_col = :bodymass,
                               num_size_rule = mass_rule)
 
-    pfim_downsample_contsize = PFIM(traits, feeding_rules; 
-                                    return_type = :matrix,
-                                    size_col = :bodymass,
-                                    num_size_rule = mass_rule, 
-                                    y = 30.0, downsample = true)
+    #pfim_downsample_contsize = PFIM(traits, feeding_rules; 
+    #                                return_type = :matrix,
+    #                                size_col = :bodymass,
+    #                                num_size_rule = mass_rule, 
+    #                                y = 30.0, downsample = true)
 
     parameters = adbm_parameters(traits, bodysize)
     N = adbmmodel(traits, parameters, biomass)
@@ -96,9 +110,9 @@ for i in 1:n_networks
 
     # Put them in a structured container
     networks = Dict(
-        "meta" => pfim_meta,
+        #"meta" => pfim_meta,
         "down" => pfim_downsample,
-        "meta_size" => pfim_meta_contsize,
+        #"meta_size" => pfim_meta_contsize,
         "down_size" => pfim_downsample_contsize,
         "niche" => niche,
         "ADBM" => adbm
@@ -111,7 +125,10 @@ for i in 1:n_networks
         fw = Foodweb(A)
         S = size(A, 1)
 
-        if net_name ∈ ["niche", "meta", "down", "ADBM"]
+        if net_name ∈ ["niche",
+                       #"meta", 
+                       "down", 
+                       "ADBM"]
 
             # model params - use standard bodysize scaling
             params = default_model(
