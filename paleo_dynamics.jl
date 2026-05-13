@@ -1,15 +1,16 @@
 #=
 Main workflow:
-- Generate networks; 
-- Assign body- and bio-mass; 
-- First burn-in; 
-- Topological Extinctions;  
-- Dynamic Extinctions; 
+- Generate PFIM reference networks
+- Assign body- and biomass
+- Burn-in PFIM networks
+- Calibrate ADBM + Niche to PFIM attractors
+- Burn-in ADBM + Niche (single realisation each)
+- Topological extinctions
+- Dynamic extinctions
 =#
 
 # --- 1. General Set-up ---
 
-# Load Dependencies
 using CSV
 using DataFrames
 using DifferentialEquations
@@ -22,55 +23,51 @@ using ProgressMeter
 using SpeciesInteractionNetworks
 using Statistics
 
-# call internal functions
 include("src/internals.jl")
 include("src/adbm.jl")
 
-# set seed
 import Random
-Random.seed!(66);
+Random.seed!(66)
 
-# output dict
+# --- storage ---
 rows = Dict[]
 topo_curve_store = DataFrame()
 dyn_curve_store  = DataFrame()
-species_store = DataFrame()
+species_store    = DataFrame()
 
-# import dataframes
+# --- data ---
 traits = CSV.read("data/community.csv", DataFrame)
 feeding_rules = CSV.read("data/feeding_rules.csv", DataFrame)
 
-# --- Global Params ---
-n_networks = 2                  # number of networks to make
-t = 5000                           # relaxation time after perturbation
-survival_threshold = 1e-12         # extinction threshold
+# --- global params ---
+n_networks = 2
+t = 5000
+survival_threshold = 1e-12
 
-# --- Pruning Params ---
-n_candidates = 5
-S_tolerance = 4
-C_tolerance = 0.1
+# --- calibration ---
+adbm_survival_rate = 0.75     # fraction of species surviving burn-in
+link_retention = 0.95
+
+# --- body size distribution ---
+global_dist = LogNormal(log(30), 1.5)
+
+size_bounds = Dict(
+    "tiny"       => (0.1, 10.0),
+    "small"      => (10.0, 50.0),
+    "medium"     => (50.0, 100.0),
+    "large"      => (100.0, 300.0),
+    "very_large" => (300.0, 500.0),
+    "gigantic"   => (500.0, Inf)
+)
+
+# MAIN LOOP
 
 for i in 1:n_networks
 
-    # --- 1. Assign body sizes ---
+    # --- 1. Body sizes ---
+
     y = collect(String, traits.size)
 
-    # Global body-size distribution
-    global_dist = LogNormal(log(30), 1.5)
-    # median ≈ 30
-    # sigma controls spread/right-tail
-
-    # Category bounds
-    size_bounds = Dict(
-        "tiny"       => (0.1, 10.0),
-        "small"      => (10.0, 50.0),
-        "medium"     => (50.0, 100.0),
-        "large"      => (100.0, 300.0),
-        "very_large" => (300.0, 500.0),
-        "gigantic"   => (500.0, Inf)
-    )
-
-    # Sample from truncated log-normal
     bodysize = [
         begin
             lo, hi = size_bounds[s]
@@ -80,15 +77,13 @@ for i in 1:n_networks
     ]
 
     traits[!, :bodymass] = bodysize
+    biomass = bodysize .^ (-3/4)
 
-    # Estimate biomass using Metabolic Theory scaling (M^-3/4)
-    biomass = bodysize .^ (-3 / 4)
-
-    # --- 2. Generate PFIM reference networks ---
+    # --- 2. PFIM networks ---
 
     mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
-    pfim_downsample = PFIM(
+    pfim_down = PFIM(
         traits,
         feeding_rules;
         return_type = :matrix,
@@ -96,7 +91,7 @@ for i in 1:n_networks
         downsample = true
     )
 
-    pfim_downsample_contsize = PFIM(
+    pfim_down_size = PFIM(
         traits,
         feeding_rules;
         return_type = :matrix,
@@ -106,137 +101,92 @@ for i in 1:n_networks
         downsample = true
     )
 
-    # --- 3. Realise PFIM networks ---
+    # --- 3. Realised PFIM networks (burn-in) --- 
 
     realised_networks = Dict()
 
-    # PFIM without explicit body sizes
-    pfim_realised = realise_network(
-        pfim_downsample;
+    pfim_down_realised = realise_network(
+        pfim_down;
         t = t,
         threshold = survival_threshold
     )
 
-    if pfim_realised !== nothing
-        realised_networks["down"] = pfim_realised
-    end
-
-    # PFIM with continuous body sizes
-    pfim_size_realised = realise_network(
-        pfim_downsample_contsize;
+    pfim_down_size_realised = realise_network(
+        pfim_down_size;
         bodymasses = bodysize,
         t = t,
         threshold = survival_threshold
     )
 
-    if pfim_size_realised !== nothing
-        realised_networks["down_size"] = pfim_size_realised
+    if pfim_down_realised !== nothing
+        realised_networks["down"] = pfim_down_realised
     end
 
-    # --- 4. Select ecological reference network ---
+    if pfim_down_size_realised !== nothing
+        realised_networks["down_size"] = pfim_down_size_realised
+    end
 
-    # Use size-structured PFIM as ecological target
+    # --- 4. Generate matches ADBM + Niche --- 
 
-    reference_name = "down_size"
-    reference_net = realised_networks[reference_name]
+    matched_networks = copy(realised_networks)
 
-    target_S = reference_net.S
-    target_C = reference_net.C
+    for (ref_name, ref_net) in realised_networks
 
-    println("\n=================================================")
-    println("Ecological reference: $reference_name")
-    println("=================================================")
+        println("\n========================================")
+        println("Reference: $ref_name")
+        println("========================================")
 
-    println("Target realised richness: $target_S")
-    println("Target realised connectance: $target_C")
+        target_S = ref_net.S
+        target_C = ref_net.C
 
-    # Estimate generation parameters
+        # --- latent correction for burn-in loss ---
+        S_latent = ceil(Int, target_S / adbm_survival_rate)
+        C_latent = target_C / link_retention
 
-    # Burn-in generally reduces richness/connectance
+        println("Target S: $target_S → Latent S: $S_latent")
+        println("Target C: $target_C → Latent C: $C_latent")
 
-    S_generate = target_S + 5
-    C_generate = target_C * 1.2
+        # ADBM
 
-    # Generate matched niche network
+        params = adbm_parameters(traits, bodysize)
 
-    println("\nSearching for matching niche network...")
+        adbm_net = adbmmodel(traits, params, biomass)
 
-    best_niche = find_matching_network(
+        adbm_realised = realise_network(
+            Int.(adbm_net.edges.edges);
+            t = t,
+            threshold = survival_threshold
+        )
 
-        () -> begin
+        if adbm_realised !== nothing
+            matched_networks["ADBM_$ref_name"] = adbm_realised
+        else
+            @warn "ADBM failed for $ref_name"
+        end
 
-            niche_fw = Foodweb(
-                :niche;
-                S = S_generate,
-                C = C_generate
-            )
+        # NICHE
 
-            niche_A = Matrix(niche_fw.A)
+        niche_fw = Foodweb(
+            :niche;
+            S = S_latent,
+            C = C_latent
+        )
 
-            realise_network(
-                niche_A;
-                t = t,
-                threshold = survival_threshold
-            )
+        niche_realised = realise_network(
+            Matrix(niche_fw.A);
+            t = t,
+            threshold = survival_threshold
+        )
 
-        end,
+        if niche_realised !== nothing
+            matched_networks["niche_$ref_name"] = niche_realised
+        else
+            @warn "Niche failed for $ref_name"
+        end
+    end
 
-        target_S,
-        target_C;
+    # --- 5. Run simulations --- 
 
-        max_attempts = n_candidates,
-        S_tol = S_tolerance,
-        C_tol = C_tolerance
-    )
-
-    # Generate matched ADBM network
-
-    println("\nSearching for matching ADBM network...")
-
-    best_adbm = find_matching_network(
-
-        () -> begin
-
-            parameters = adbm_parameters(
-                traits,
-                bodysize
-            )
-
-            N = adbmmodel(
-                traits,
-                parameters,
-                biomass
-            )
-
-            adbm_A = Matrix(N.edges.edges)
-
-            realise_network(
-                adbm_A;
-                t = t,
-                threshold = survival_threshold
-            )
-
-        end,
-
-        target_S,
-        target_C;
-
-        max_attempts = n_candidates,
-        S_tol = S_tolerance,
-        C_tol = C_tolerance
-    )
-
-    # Final network collection
-
-    matched_networks = Dict(
-
-        "down" => realised_networks["down"],
-        "down_size" => realised_networks["down_size"],
-        "niche" => best_niche,
-        "ADBM" => best_adbm
-    )
-
-    # --- 5. Run sims per a network type ---
     for (net_name, realised) in matched_networks
 
         A = realised.A
@@ -244,11 +194,10 @@ for i in 1:n_networks
         final_biomasses = realised.biomasses
         survivors = realised.survivors
 
-        final_adj_matrix = realised.A
+        N = build_network(A)
 
-        N = build_network(final_adj_matrix)
+        # species data
 
-        # --- 6. species stats ---
         BM = params.M[survivors]
         TL = params.trophic.levels[survivors]
         MC = params.metabolic_class[survivors]
@@ -260,41 +209,44 @@ for i in 1:n_networks
             original_id = survivors,
             body_mass = BM,
             trophic_level = TL,
-            metabolic_class = MC,
+            metabolic_class = MC
         )
 
         append!(species_store, species_df)
 
-        # --- 7. Topological extinctions ---
+        # topological extinctions
+
         topo_results = run_topological_extinctions(N, params)
         R_topo = compute_robustness(topo_results)
 
-        topo_curves = Dict()
-        for (k, v) in topo_results
-            topo_curves[k] = extinction_breakdown(v)
-        end
+        topo_curves = Dict(
+            k => extinction_breakdown(v)
+            for (k, v) in topo_results
+        )
 
         topo_df = export_curves(topo_curves, "topo_$net_name", i)
         append!(topo_curve_store, topo_df)
 
-        # --- 8. dynamic extinctions ---
-        dynamic_results = run_dynamic_extinctions(params, final_biomasses)
-        R_dyn = compute_robustness(dynamic_results)
+        # dynamic extinctions
 
-        dyn_curves = Dict()
-        for (k, v) in dynamic_results
-            dyn_curves[k] = extinction_breakdown(v)
-        end
+        dyn_results = run_dynamic_extinctions(params, final_biomasses)
+        R_dyn = compute_robustness(dyn_results)
+
+        dyn_curves = Dict(
+            k => extinction_breakdown(v)
+            for (k, v) in dyn_results
+        )
 
         dyn_df = export_curves(dyn_curves, "dyn_$net_name", i)
         append!(dyn_curve_store, dyn_df)
 
-        # --- 9. summary row ---
+        # summary row
+
         row = Dict(
             :net_id => i,
             :net_type => net_name,
             :S => length(survivors),
-            :C => sum(final_adj_matrix) / (length(survivors)^2),
+            :C => sum(A) / (length(survivors)^2)
         )
 
         for (k, v) in R_topo
@@ -309,13 +261,11 @@ for i in 1:n_networks
     end
 end
 
-# create data frame object
-results_df = DataFrame(rows)
+# --- 6. Save outputs ---
 
-# extinction curves
+results_df = DataFrame(rows)
 all_curve_df = vcat(topo_curve_store, dyn_curve_store)
 
-# Write files
 CSV.write("outputs/paleo_robustness_summaries.csv", results_df)
 CSV.write("outputs/paleo_extinction_curves.csv", all_curve_df)
 CSV.write("outputs/paleo_species_metadata.csv", species_store)
