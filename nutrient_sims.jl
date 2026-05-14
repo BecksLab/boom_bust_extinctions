@@ -1,232 +1,119 @@
-# ============================================================
-# ECOLOGICAL NETWORK + DYNAMIC NUTRIENT FORCING FRAMEWORK
-# ============================================================
-# Main workflow:
-# 1. Generate food web
-# 2. Define nutrient forcing scenario (time-dependent environment)
-# 3. Simulate ecological dynamics
-# 4. Track biomass + extinctions
-# 5. Analyse and visualise outputs
-# ============================================================
-
-# ---------------------------
-# 1. Load dependencies
-# ---------------------------
-
-using CSV
-using DataFrames
-using DifferentialEquations
-using Distributions
 using EcologicalNetworksDynamics
-using Extinctions
-using JLD2
-using Plots
-using ProgressMeter
-using SpeciesInteractionNetworks
-using Statistics
+using Random
+using CairoMakie
 
-# ---------------------------
-# 2. Model parameters
-# ---------------------------
+# ----------------------------
+# MODEL SETUP (1 nutrient)
+# ----------------------------
+foodweb = Foodweb([0 0; 0 0])
+mortality = Mortality([0.6, 1.2])
 
-S = 10                  # number of species
-C = 0.1                 # connectance
-tmax = 5000             # simulation time
-survival_threshold = 1e-12
+concentration = [
+    1 => (1, 0.8),
+    2 => (1, 1.1)
+]
 
-# ---------------------------
-# 3. Build food web
-# ---------------------------
-
-fw = Foodweb(:niche; S, C)
-
-# Baseline nutrient + ecological model
-# NOTE: supply here is ONLY baseline (overrided it dynamically later)
-params = default_model(
-    fw,
-    BodyMass(; Z = 10),
-    NutrientIntake(1; supply = 10.2)
+nutrients = NutrientIntake(
+    1;
+    concentration = concentration,
+    turnover = 0.9,
+    supply = [10.0],
+    r = [1, 2],
 )
 
-# Initial biomass distribution
-B0 = rand(Uniform(0.1, 1), S)
+m = default_model(foodweb, nutrients, mortality)
 
-# 4. NUTRIENT FORCING FRAMEWORK
+# ----------------------------
+# FORCING FUNCTIONS
+# ----------------------------
+supply_const(t) = 10.0
+supply_linear(t) = 8.0 + 0.05 * t
+supply_seasonal(t) = 10.0 + 4.0 * sin(2π * t / 20.0)
+supply_exp(t) = 8.0 * exp(0.01 * t)
 
-# Abstract type for clarity (useful for thesis explanation)
-abstract type NutrientScenario end
+# ----------------------------
+# SIMULATION FUNCTION
+# ----------------------------
+function run_sim(m, supply_func; dt=0.5, Tend=100.0)
 
-struct Constant <: NutrientScenario end
-struct Linear <: NutrientScenario end
-struct Exponential <: NutrientScenario end
-struct Sigmoid <: NutrientScenario end
-struct Seasonal <: NutrientScenario end
+    Random.seed!(66)
 
-# ------------------------------------------------------------
-# Time-dependent nutrient supply function
-#
-# S0 = baseline nutrient level
-# t  = current simulation time
-# scenario controls how supply is modified over time
-# ------------------------------------------------------------
+    B0 = [0.5, 0.5]
+    N0 = [1.0]
 
-function supply(t, S0, scenario, tmax)
-    if scenario isa Constant
-        # No forcing: supply stays at baseline
-        return S0
-    elseif scenario isa Linear
-        # Linear decline from baseline to 20% baseline over the full run
-        return max(0.2 * S0, S0 * (1 - 0.8 * t / tmax))
-    elseif scenario isa Exponential
-        # Exponential decay toward a nonzero minimum
-        rate = 0.001
-        return S0 * exp(-rate * t) + 0.2 * S0
-    elseif scenario isa Sigmoid
-        # Smooth logistic transition from high to low supply
-        midpoint = tmax / 2
-        steepness = 0.02
-        min_supply = 0.2 * S0
-        return min_supply + (S0 - min_supply) / (1 + exp(steepness * (t - midpoint)))
-    elseif scenario isa Seasonal
-        # Periodic seasonal variation around baseline supply
-        amplitude = 0.3 * S0
-        period = 250.0
-        return max(0.0, S0 + amplitude * sin(2π * t / period))
-    else
-        error("Unknown nutrient scenario: $(typeof(scenario))")
-    end
-end
+    t = 0.0
+    B = copy(B0)
+    N = copy(N0)
 
-function run_simulation(m, B0, tmax, S0, scenario)
+    sol_t = Float64[]
+    sol_B1 = Float64[]
+    sol_B2 = Float64[]
+    sol_N = Float64[]
 
-    # ---------------------------
-    # CONSTANT CASE (no forcing)
-    # ---------------------------
-    if scenario isa Constant
+    while t < Tend
 
-        return simulate(
-            m,
-            B0,
-            tmax;
-            N0 = [S0],
-            show_degenerated = false
+        nutrients = NutrientIntake(
+            1;
+            concentration = concentration,
+            turnover = 0.9,
+            supply = [supply_func(t)],
+            r = [1, 2],
         )
+
+        m_local = default_model(foodweb, nutrients, mortality)
+
+        sol = simulate(m_local, B, dt; N0 = N)
+
+        B = sol[1:2, end]
+        N = sol[3, end]
+
+        append!(sol_t, sol.t .+ t)
+        append!(sol_B1, sol[1, :])
+        append!(sol_B2, sol[2, :])
+        append!(sol_N, sol[3, :])
+
+        t += dt
     end
 
-    # ---------------------------
-    # DYNAMIC CASE (forcing)
-    # ---------------------------
-    function update_nutrients!(integrator)
-        t = integrator.t
-        model = integrator.p.model
-        model.nutrients.supply .= supply(t, S0, scenario, tmax)
-    end
-
-    cb = PeriodicCallback(update_nutrients!, 1.0)
-
-    return simulate(
-        m,
-        B0,
-        tmax;
-        N0 = [S0],
-        callback = CallbackSet(
-            extinction_callback(m, survival_threshold),
-            cb
-        ),
-        show_degenerated = false
-    )
+    return sol_t, sol_B1, sol_B2, sol_N
 end
 
-# 6. EXPERIMENT SETUP
+# ----------------------------
+# RUN ALL SCENARIOS
+# ----------------------------
+t1, B11, B21, N1 = run_sim(m, supply_const)
+t2, B12, B22, N2 = run_sim(m, supply_linear)
+t3, B13, B23, N3 = run_sim(m, supply_seasonal)
+t4, B14, B24, N4 = run_sim(m, supply_exp)
 
-S = 10
-C = 0.1
-tmax = 5000
-survival_threshold = 1e-12
+# ----------------------------
+# PLOTTING
+# ----------------------------
+fig = Figure(; size = (900, 700))
 
-fw = Foodweb(:niche; S, C)
+labels = ["Constant", "Linear", "Seasonal", "Exponential"]
 
-m = default_model(
-    fw,
-    BodyMass(; Z = 10),
-    NutrientIntake(1; supply = 10.2)
-)
-
-B0 = rand(Uniform(0.1, 1), S)
-
-
-scenarios = [
-    Constant(),
-    Linear(),
-    Exponential(),
-    Sigmoid(),
-    Seasonal()
+data = [
+    (t1, B11, B21, N1),
+    (t2, B12, B22, N2),
+    (t3, B13, B23, N3),
+    (t4, B14, B24, N4)
 ]
 
-scenario_names = [
-    "Constant",
-    "Linear",
-    "Exponential",
-    "Sigmoid",
-    "Seasonal"
-]
+for i in 1:4
+    t, B1, B2, N = data[i]
 
-results = Dict()
-
-for (sc, name) in zip(scenarios, scenario_names)
-
-    println("Running: ", name)
-
-    sol = run_simulation(m, B0, tmax, 10.2, sc)
-
-    results[name] = (sol, sc)
-end
-
-biomass = Dict()
-supply_history = Dict()
-
-for (name, (sol, sc)) in results
-
-    biomass[name] = hcat(sol.u...)
-    supply_history[name] = [supply(t, 10.2, sc, tmax) for t in sol.t]
-end
-
-total_biomass = Dict()
-
-for (name, B) in biomass
-
-    total_biomass[name] = vec(sum(B, dims=1))
-end
-
-# 7. POST-PROCESSING PLACEHOLDER
-
-burnin = 100  # number of initial timesteps to discard as burn-in
-
-plot()
-
-for name in scenario_names
-    plot!(
-        total_biomass[name],
-        label = name
+    ax = Axis(fig[i, 1],
+        xlabel = i == 4 ? "Time" : "",
+        ylabel = "Biomass / Nutrient",
+        title = labels[i]
     )
+
+    Makie.lines!(ax, t, B1, color = :red, label = "Plant 1")
+    Makie.lines!(ax, t, B2, color = :green, label = "Plant 2")
+    Makie.lines!(ax, t, N, color = :blue, linestyle = :dot, label = "Nutrient")
+
+    axislegend(ax, position = :rt)
 end
 
-xlabel!("Time")
-ylabel!("Total biomass")
-title!("Biomass dynamics under nutrient forcing scenarios")
-xlims!(burnin, tmax)
-ylims!(10, 12.5)
-
-# Plot the actual nutrient supply trajectories for each scenario.
-# This makes the forcing explicit and shows the modified supply inputs.
-plot_supply = plot()
-for name in scenario_names
-    plot!(plot_supply, results[name][1].t, supply_history[name], label = name)
-end
-xlabel!(plot_supply, "Time")
-ylabel!(plot_supply, "Nutrient supply")
-title!(plot_supply, "Nutrient supply forcing scenarios")
-
-display(plot_supply)
-
-println("Simulation complete.")
+fig
