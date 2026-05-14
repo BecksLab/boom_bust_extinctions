@@ -10,7 +10,7 @@ C = 0.1
 foodweb = Foodweb(:niche; S, C)
 
 # basal species (no incoming links)
-basal = findall(i -> sum(foodweb.A[:, i]) == 0, 1:S)
+basal = findall(i -> sum(foodweb.A[i, :]) == 0, 1:S)
 println("Basal species: ", basal)
 
 # ----------------------------
@@ -48,19 +48,16 @@ function run_sim(supply_func; dt=0.5, Tend=100.0)
 
         supp = supply_func(t)
 
-        # ----------------------------
-        # KEY FIXES HERE
-        # ----------------------------
         concentration = [
-            i => (1, 0.8 + 0.4 * rand()) for i in 1:S
+            i => (1, 0.2 + 0.4 * rand()) for i in 1:length(basal)
         ]
 
         nutrients = NutrientIntake(
             1;
-            turnover = 0.2,          # ↓ slower damping → stronger forcing signal
+            turnover = 0.2,
             supply = [supp],
             concentration = concentration,
-            r = fill(1.5, S)         # ↑ faster biomass response
+            r = [i => 1 for i in basal]
         )
 
         m = default_model(foodweb, nutrients, Mortality(fill(0.6, S)))
@@ -92,7 +89,7 @@ end
 # ----------------------------
 # PLOTTING
 # ----------------------------
-fig = Figure(resolution = (1100, 900))
+fig = Figure(; size = (1100, 900))
 
 for (i, (name, _)) in enumerate(scenarios)
 
