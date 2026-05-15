@@ -3,8 +3,7 @@ Main workflow:
 - Generate PFIM reference networks
 - Assign body- and biomass
 - Burn-in PFIM networks
-- Calibrate ADBM + Niche to PFIM attractors
-- Burn-in ADBM + Niche (single realisation each)
+- Generate ONE niche model matching the realised PFIM structure
 - Topological extinctions
 - Dynamic extinctions
 =#
@@ -24,7 +23,6 @@ using SpeciesInteractionNetworks
 using Statistics
 
 include("src/internals.jl")
-include("src/adbm.jl")
 
 import Random
 Random.seed!(66)
@@ -45,7 +43,6 @@ t = 5000
 survival_threshold = 1e-12
 
 # --- calibration ---
-adbm_survival_rate = 0.75     # fraction of species surviving burn-in
 link_retention = 0.95
 
 # --- body size distribution ---
@@ -87,7 +84,7 @@ for i in 1:n_networks
         traits,
         feeding_rules;
         return_type = :matrix,
-        y = 30.0,
+        y = 3.0,
         downsample = true
     )
 
@@ -97,11 +94,11 @@ for i in 1:n_networks
         return_type = :matrix,
         size_col = :bodymass,
         num_size_rule = mass_rule,
-        y = 30.0,
+        y = 3.0,
         downsample = true
     )
 
-    # --- 3. Realised PFIM networks (burn-in) --- 
+    # --- 3. Realised PFIM networks (burn-in) ---
 
     realised_networks = Dict()
 
@@ -126,66 +123,46 @@ for i in 1:n_networks
         realised_networks["down_size"] = pfim_down_size_realised
     end
 
-    # --- 4. Generate matches ADBM + Niche --- 
+    # --- 4. Generate ONE niche model ---
 
     matched_networks = copy(realised_networks)
 
-    for (ref_name, ref_net) in realised_networks
+    # Use first realised PFIM network as reference
+    ref_name, ref_net = first(realised_networks)
 
-        println("\n========================================")
-        println("Reference: $ref_name")
-        println("========================================")
+    println("\n========================================")
+    println("Generating niche model")
+    println("Reference: $ref_name")
+    println("========================================")
 
-        target_S = ref_net.S
-        target_C = ref_net.C
+    target_S = ref_net.S + 7
+    target_C = ref_net.C
 
-        # --- latent correction for burn-in loss ---
-        S_latent = ceil(Int, target_S / adbm_survival_rate)
-        C_latent = target_C / link_retention
+    # latent correction for burn-in loss
+    C_latent = target_C / link_retention
 
-        println("Target S: $target_S → Latent S: $S_latent")
-        println("Target C: $target_C → Latent C: $C_latent")
+    println("Target S: $target_S")
+    println("Target C: $target_C → Latent C: $C_latent")
 
-        # ADBM
+    niche_fw = Foodweb(
+        :niche;
+        S = target_S,
+        C = C_latent
+    )
 
-        params = adbm_parameters(traits, bodysize)
+    niche_realised = realise_network(
+        Matrix(niche_fw.A);
+        t = t,
+        threshold = survival_threshold
+    )
 
-        adbm_net = adbmmodel(traits, params, biomass)
-
-        adbm_realised = realise_network(
-            Int.(adbm_net.edges.edges);
-            t = t,
-            threshold = survival_threshold
-        )
-
-        if adbm_realised !== nothing
-            matched_networks["ADBM_$ref_name"] = adbm_realised
-        else
-            @warn "ADBM failed for $ref_name"
-        end
-
-        # NICHE
-
-        niche_fw = Foodweb(
-            :niche;
-            S = S_latent,
-            C = C_latent
-        )
-
-        niche_realised = realise_network(
-            Matrix(niche_fw.A);
-            t = t,
-            threshold = survival_threshold
-        )
-
-        if niche_realised !== nothing
-            matched_networks["niche_$ref_name"] = niche_realised
-        else
-            @warn "Niche failed for $ref_name"
-        end
+    if niche_realised !== nothing
+        matched_networks["niche"] = niche_realised
+    else
+        @warn "Niche model failed"
     end
 
-    # --- 5. Run simulations --- 
+    # --- 5. Run simulations ---
 
     for (net_name, realised) in matched_networks
 
