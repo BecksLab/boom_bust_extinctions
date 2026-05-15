@@ -9,18 +9,14 @@
 # 5. Analyse and visualise outputs
 # ============================================================
 
-# ---------------------------
 # 1. Load dependencies
-# ---------------------------
 
 using GMT
 using EcologicalNetworksDynamics
 using Random
 using CairoMakie
 
-# ---------------------------
 # 2. Create synthetic nutrient scenarios
-# ---------------------------
 
 # Load paleo nutrient data (kept for future use)
 ecogenie_raw = grdinterpolate("data/ecogenie.nc"; track = (103, 17));
