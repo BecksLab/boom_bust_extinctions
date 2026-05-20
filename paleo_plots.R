@@ -78,3 +78,7 @@ summary(df)
 spp_df <- read.csv("outputs/paleo_species_metadata.csv")
 
 spp_df
+
+df %>%
+  vibe_check(net_type, S, C) %>%
+  unique()
