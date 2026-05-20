@@ -38,7 +38,7 @@ traits = CSV.read("data/community.csv", DataFrame)
 feeding_rules = CSV.read("data/feeding_rules.csv", DataFrame)
 
 # --- global params ---
-n_networks = 2
+n_networks = 10
 t = 5000
 survival_threshold = 1e-12
 
@@ -49,6 +49,7 @@ link_retention = 0.95
 global_dist = LogNormal(log(30), 1.5)
 
 size_bounds = Dict(
+    "primary"    => (0.01, 0.1),
     "tiny"       => (0.1, 10.0),
     "small"      => (10.0, 50.0),
     "medium"     => (50.0, 100.0),
@@ -74,14 +75,29 @@ for i in 1:n_networks
     ]
 
     traits[!, :bodymass] = bodysize
-    biomass = bodysize .^ (-3/4)
+
+    # MANUALLY ADD 5 PLANKTON CLASSES
+    plankton = DataFrame(
+    species  = ["Plankton_1", "Plankton_2", "Plankton_3", "Plankton_4", "Plankton_5"],
+    motility = ["primary", "primary", "primary", "primary", "primary"],
+    tiering  = ["primary", "primary", "primary", "primary", "primary"],
+    feeding  = ["primary", "primary", "primary", "primary", "primary"],
+    size     = ["primary", "primary", "primary", "primary", "primary"],
+    bodymass = [rand(truncated(global_dist, size_bounds["primary"]...))
+                    for _ in 1:5
+                ]
+            )
+
+    df = vcat(traits, plankton)
+
+    biomass = df.bodymass .^ (-3/4)
 
     # --- 2. PFIM networks ---
 
     mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
     pfim_down = PFIM(
-        traits,
+        df,
         feeding_rules;
         return_type = :matrix,
         y = 3.0,
@@ -110,7 +126,7 @@ for i in 1:n_networks
 
     pfim_down_size_realised = realise_network(
         pfim_down_size;
-        bodymasses = bodysize,
+        #bodymasses = bodysize,
         t = t,
         threshold = survival_threshold
     )
