@@ -38,7 +38,7 @@ traits = CSV.read("data/community.csv", DataFrame)
 feeding_rules = CSV.read("data/feeding_rules.csv", DataFrame)
 
 # --- global params ---
-n_networks = 10
+n_networks = 20
 t = 5000
 survival_threshold = 1e-12
 
