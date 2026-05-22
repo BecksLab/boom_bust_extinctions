@@ -103,12 +103,14 @@ for (i, (name, _)) in enumerate(scenarios)
 
     # basal species only (clear signal)
     for sp in basal
-        lines!(ax, t, Bmat[:, sp], label = "Basal $sp")
+        Makie.lines!(ax, t, Bmat[:, sp], label = "Basal $sp")
     end
 
-    lines!(ax, t, N, color = :blue, linestyle = :dash, label = "Nutrient")
+    Makie.lines!(ax, t, N, color = :blue, linestyle = :dash, label = "Nutrient")
 
     axislegend(ax, position = :rt)
 end
 
 fig
+
+save("figures/nutrient_scenarios.png", fig)
