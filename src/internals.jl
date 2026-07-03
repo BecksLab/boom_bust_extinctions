@@ -677,7 +677,9 @@ function realise_network(
     threshold = 1e-12
 )
 
-    fw = Foodweb(A)
+    A_trans = Matrix(transpose(A))
+
+    fw = Foodweb(A_trans)
 
     if isnothing(bodymasses)
 
@@ -697,7 +699,7 @@ function realise_network(
 
     end
 
-    S = size(A, 1)
+    S = size(A_trans, 1)
 
     B0 = rand(Uniform(0.1, 1), S)
 
