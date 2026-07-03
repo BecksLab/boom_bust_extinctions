@@ -68,7 +68,7 @@ function run_sim(nutrient1, nutrient2; dt=1, Tend=5000)
     out_N2 = Float64[]
 
     # identify basal species
-    basal = findall(i -> sum(foodweb.A[i, :]) == 0, 1:S)
+    basal = findall(i -> sum(fw.A[i, :]) == 0, 1:S)
 
     # create fixed nutrient geometry
     #concentration = [
@@ -173,4 +173,4 @@ Makie.lines!(ax, t, N2,
 
 axislegend(ax)
 
-fig
+save("figures/multi_nutrients.png", fig)
