@@ -30,12 +30,14 @@ Random.seed!(66)
 # --- storage ---
 rows = Dict[]
 topo_curve_store = DataFrame()
-dyn_curve_store  = DataFrame()
-species_store    = DataFrame()
+dyn_curve_store = DataFrame()
+species_store = DataFrame()
 
 # --- data ---
 traits = CSV.read("data/community.csv", DataFrame)
 feeding_rules = CSV.read("data/feeding_rules.csv", DataFrame)
+# import plankton df (note this also has ecogenie biomass)
+plankton = CSV.read("data/community_plankton.csv", DataFrame)
 
 # --- global params ---
 n_networks = 20
@@ -49,13 +51,13 @@ link_retention = 0.95
 global_dist = LogNormal(log(30), 1.5)
 
 size_bounds = Dict(
-    "primary"    => (0.01, 0.1),
-    "tiny"       => (0.1, 10.0),
-    "small"      => (10.0, 50.0),
-    "medium"     => (50.0, 100.0),
-    "large"      => (100.0, 300.0),
+    "primary" => (0.01, 0.1),
+    "tiny" => (0.1, 10.0),
+    "small" => (10.0, 50.0),
+    "medium" => (50.0, 100.0),
+    "large" => (100.0, 300.0),
     "very_large" => (300.0, 500.0),
-    "gigantic"   => (500.0, Inf)
+    "gigantic" => (500.0, Inf)
 )
 
 # MAIN LOOP
@@ -75,60 +77,63 @@ for i in 1:n_networks
     ]
 
     traits[!, :bodymass] = bodysize
-
-    # MANUALLY ADD 5 PLANKTON CLASSES
-    plankton = DataFrame(
-    species  = ["Plankton_1", "Plankton_2", "Plankton_3", "Plankton_4", "Plankton_5"],
-    motility = ["primary", "primary", "primary", "primary", "primary"],
-    tiering  = ["primary", "primary", "primary", "primary", "primary"],
-    feeding  = ["primary", "primary", "primary", "primary", "primary"],
-    size     = ["primary", "primary", "primary", "primary", "primary"],
-    bodymass = [rand(truncated(global_dist, size_bounds["primary"]...))
-                    for _ in 1:5
-                ]
-            )
+    traits.biomass = fill(missing, nrow(traits))
 
     df = vcat(traits, plankton)
 
-    biomass = df.bodymass .^ (-3/4)
+    # --- 2. Biomass estimates ---
 
-    # --- 2. PFIM networks ---
+    known = .!ismissing.(df.biomass)
+
+    b = -3/4
+
+    a = exp(mean(log.(df.biomass[known]) .- b .* log.(df.bodymass[known])))
+
+    predicted = df.bodymass .^ b
+
+    df.biomass[.!known] .= predicted[.!known]
+
+    biomass = float.(df.biomass)
+
+    select!(df, Not(:biomass, :bodymass))
+
+    # --- 3. PFIM networks ---
 
     mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
     pfim_down = PFIM(
         df,
         feeding_rules;
-        return_type = :matrix,
-        y = 3.0,
-        downsample = true
+        return_type=:matrix,
+        y=3.0,
+        downsample=true
     )
 
     pfim_down_size = PFIM(
         traits,
         feeding_rules;
-        return_type = :matrix,
-        size_col = :bodymass,
-        num_size_rule = mass_rule,
-        y = 3.0,
-        downsample = true
+        return_type=:matrix,
+        size_col=:bodymass,
+        num_size_rule=mass_rule,
+        y=3.0,
+        downsample=true
     )
 
-    # --- 3. Realised PFIM networks (burn-in) ---
+    # --- 4. Realised PFIM networks (burn-in) ---
 
     realised_networks = Dict()
 
     pfim_down_realised = realise_network(
         pfim_down;
-        t = t,
-        threshold = survival_threshold
+        t=t,
+        threshold=survival_threshold
     )
 
     pfim_down_size_realised = realise_network(
         pfim_down_size;
         #bodymasses = bodysize,
-        t = t,
-        threshold = survival_threshold
+        t=t,
+        threshold=survival_threshold
     )
 
     if pfim_down_realised !== nothing
@@ -139,7 +144,13 @@ for i in 1:n_networks
         realised_networks["down_size"] = pfim_down_size_realised
     end
 
-    # --- 4. Generate ONE niche model ---
+    # Skip this replicate if no PFIM network successfully realised
+    if isempty(realised_networks)
+        @warn "Iteration $i: no realised PFIM networks. Skipping."
+        continue
+    end
+
+    # --- 5. Generate ONE niche model ---
 
     matched_networks = copy(realised_networks)
 
@@ -160,16 +171,22 @@ for i in 1:n_networks
     println("Target S: $target_S")
     println("Target C: $target_C → Latent C: $C_latent")
 
+    # Skip this replicate if no PFIM network successfully realised
+    if target_C > 0.5
+        @warn "Iteration $i: Co too high. Skipping."
+        continue
+    end
+
     niche_fw = Foodweb(
         :niche;
-        S = target_S,
-        C = C_latent
+        S=target_S,
+        C=C_latent
     )
 
     niche_realised = realise_network(
         Matrix(niche_fw.A);
-        t = t,
-        threshold = survival_threshold
+        t=t,
+        threshold=survival_threshold
     )
 
     if niche_realised !== nothing
@@ -178,7 +195,7 @@ for i in 1:n_networks
         @warn "Niche model failed"
     end
 
-    # --- 5. Run simulations ---
+    # --- 6. Run simulations ---
 
     for (net_name, realised) in matched_networks
 
@@ -196,13 +213,13 @@ for i in 1:n_networks
         MC = params.metabolic_class[survivors]
 
         species_df = DataFrame(
-            net_id = fill(i, length(survivors)),
-            net_type = fill(net_name, length(survivors)),
-            species_id = 1:length(survivors),
-            original_id = survivors,
-            body_mass = BM,
-            trophic_level = TL,
-            metabolic_class = MC
+            net_id=fill(i, length(survivors)),
+            net_type=fill(net_name, length(survivors)),
+            species_id=1:length(survivors),
+            original_id=survivors,
+            body_mass=BM,
+            trophic_level=TL,
+            metabolic_class=MC
         )
 
         append!(species_store, species_df)
@@ -254,7 +271,7 @@ for i in 1:n_networks
     end
 end
 
-# --- 6. Save outputs ---
+# --- 7. Save outputs ---
 
 results_df = DataFrame(rows)
 all_curve_df = vcat(topo_curve_store, dyn_curve_store)
