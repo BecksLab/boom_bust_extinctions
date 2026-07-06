@@ -33,6 +33,12 @@ ggplot(df %>%
   theme_classic() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
+ggplot(df) +
+  geom_boxplot(aes(y = S,
+                   x = net_type),
+               colour = "#EAAA00") +
+  theme_classic()
+
 curves_df <- read.csv("outputs/paleo_extinction_curves.csv") %>%
   glow_up(
     net_type = str_remove(type, "^[^_]+_"),
@@ -62,9 +68,15 @@ ggplot(curves_df) +
     )
   ) +
   facet_grid(cols = vars(scenario), 
-             rows = vars(net_type))+
+             rows = vars(net_type)) +
   ylim(0, 1) + 
-  theme_bw()
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("figures/paleo_primVsec.png",
+       width = 8000, 
+       height = 4000, 
+       units = "px", dpi = 700)
 
 df %>%
   squad_up(scenario, net_type) %>%
@@ -82,3 +94,53 @@ spp_df
 df %>%
   vibe_check(net_type, S, C) %>%
   unique()
+
+df %>%
+  vibe_check(-S, -C) %>%
+  pivot_longer(cols = c(topo, dyn),
+               names_to = "mechanism",
+               values_to = "robustness") %>%
+  pivot_wider(names_from = net_type,
+              values_from = robustness) %>%
+  ggplot() +
+  geom_abline(slope = 1,
+              intercept = 0,
+              colour = "#A6192E") +
+  geom_point(aes(x = niche,
+                 y = down,
+                 colour = mechanism)) +
+  scale_colour_manual(values = c("topo" = "#046A38", "dyn" = "#FFB81C"))  +
+  facet_grid(cols = vars(scenario),
+             rows = vars(mechanism)) +
+  theme_bw()
+
+read.csv("outputs/extinction_curves.csv") %>%
+  ggplot() +
+  geom_abline(slope = -1,
+              intercept = 1,
+              colour = "#A6192E") +
+  geom_abline(slope = -1,
+              intercept = 0.5,
+              linetype = "dotted",
+              colour = "#A6192E",
+              alpha = 0.8) +
+  geom_point(aes(x = primary,
+                 y = secondary,
+                 colour = type),
+             alpha = 0.6,
+             shape = 15,
+             size = 0.5) +
+  scale_colour_manual(values = c("topo" = "#046A38", "dyn" = "#FFB81C")) +
+  guides(
+    color = guide_legend(
+      label.position = "top",
+      override.aes = list(shape = 15, size = 5, alpha = 1)
+    )
+  ) +
+  facet_wrap(vars(scenario)) +
+  ylim(0, 1) + 
+  theme_bw()
+  
+                 
+                 
+             
