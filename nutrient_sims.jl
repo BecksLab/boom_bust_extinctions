@@ -29,7 +29,7 @@ scenarios = [
 ]
 
 # ----------------------------
-# SIMULATION FUNCTION (UPDATED)
+# SIMULATION FUNCTION
 # ----------------------------
 function run_sim(supply_func; dt=0.5, Tend=100.0)
 
