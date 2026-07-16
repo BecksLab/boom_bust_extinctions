@@ -23,6 +23,7 @@ using SpeciesInteractionNetworks
 using Statistics
 
 include("src/internals.jl")
+include("src/niche_downsample.jl")
 
 import Random
 Random.seed!(66)
@@ -45,7 +46,7 @@ C_min = 0.05
 C_max = 0.15
 
 # Define the t-values we want to test
-t_values = [50, 500]
+t_values = [5000]
 
 # --- Distributions ---
 C_dist = truncated(Normal(0.15, 0.05), C_min, C_max)
@@ -98,6 +99,7 @@ for t in t_values
         biomass = float.(df.biomass)
 
         # --- 3. Base Networks Generation (Creation) ---
+        # --- 3. Base Networks Generation (Creation) ---
         mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
         pfim_cont = PFIM(df, feeding_rules; return_type=:matrix)
@@ -106,6 +108,10 @@ for t in t_values
         # Construct Foodweb objects directly
         pfim_down = Foodweb(Matrix(transpose(downsample_network(pfim_cont, 2.5; target_co=C_targ, max_iter=100))))
         pfim_down_size = Foodweb(Matrix(transpose(downsample_network(pfim_size, 2.5; target_co=C_targ, max_iter=100))))
+        
+        # Create the Niche-Downsampled Network from pfim_cont
+        pfim_niche_down = Foodweb(Matrix(transpose(downsample_niche_network(pfim_cont, 1.0; target_co=C_targ, max_iter=100))))
+        
         niche_fw = Foodweb(:niche; S=size(pfim_cont, 1), C=C_targ)
 
         prods = map(==("primary"), string.(df.tiering))
@@ -116,6 +122,7 @@ for t in t_values
             "down" => pfim_down,
             "down_size" => pfim_down_size,
             "niche" => niche_fw,
+            "niche_down" => pfim_niche_down,
             "atn" => atn_fw
         )
 
