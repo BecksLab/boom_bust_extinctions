@@ -43,9 +43,11 @@ plankton = CSV.read("data/community_plankton.csv", DataFrame)
 n_networks = 20
 t = 5000
 survival_threshold = 1e-12
+C_min = 0.05
+C_max = 0.15
 
-# --- calibration ---
-link_retention = 0.95
+# --- Co distribution ---
+C_dist = truncated(Normal(0.15, 0.05), C_min, C_max);
 
 # --- body size distribution ---
 global_dist = LogNormal(log(30), 1.5)
@@ -63,6 +65,9 @@ size_bounds = Dict(
 # MAIN LOOP
 
 for i in 1:n_networks
+
+    # --- 0. Sample parameters ---
+    C_targ = rand(C_dist)
 
     # --- 1. Body sizes ---
 
@@ -97,29 +102,46 @@ for i in 1:n_networks
 
     select!(df, Not(:biomass, :bodymass))
 
-    # --- 3. PFIM networks ---
+    # --- 3. PFIM metawebs ---
 
     mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
-    pfim_down = PFIM(
+    # create metaweb - categorical
+    pfim_cont = PFIM(
         df,
         feeding_rules;
-        return_type=:matrix,
-        y=3.0,
-        downsample=true
+        return_type=:matrix
     )
 
-    pfim_down_size = PFIM(
+    # create metaweb - cont size
+    pfim_size = PFIM(
         traits,
         feeding_rules;
         return_type=:matrix,
         size_col=:bodymass,
-        num_size_rule=mass_rule,
-        y=3.0,
-        downsample=true
+        num_size_rule=mass_rule
     )
 
-    # --- 4. Realised PFIM networks (burn-in) ---
+    # --- 3. PFIM downsample ---
+
+    pfim_down = downsample_network(pfim_cont, 2.5;
+        target_co=C_targ,
+        max_iter=100)
+
+    pfim_down_size = downsample_network(pfim_size, 2.5;
+        target_co=C_targ,
+        max_iter=100)
+
+    # --- 4. create niche web ---
+
+    # use target Co and richness of pfim web
+    niche_fw = Foodweb(
+        :niche;
+        S=size(pfim_cont, 1),
+        C=C_targ
+    )
+
+    # --- 5. Realised networks (burn-in) ---
 
     realised_networks = Dict()
 
@@ -136,6 +158,17 @@ for i in 1:n_networks
         threshold=survival_threshold
     )
 
+    niche_realised = realise_network(
+        # this is ugly and janky AF!!
+        Matrix(transpose(Matrix(niche_fw.A)));
+        t=t,
+        threshold=survival_threshold
+    )
+
+    if niche_realised !== nothing
+        realised_networks["niche"] = niche_realised
+    end
+
     if pfim_down_realised !== nothing
         realised_networks["down"] = pfim_down_realised
     end
@@ -144,60 +177,31 @@ for i in 1:n_networks
         realised_networks["down_size"] = pfim_down_size_realised
     end
 
-    # Skip this replicate if no PFIM network successfully realised
+    # Skip this replicate if no networks successfully realised
     if isempty(realised_networks)
-        @warn "Iteration $i: no realised PFIM networks. Skipping."
+        @warn "Iteration $i: no realised networks. Skipping."
         continue
     end
 
-    # --- 5. Generate ONE niche model ---
+    # build mini df that has the initial richness and Co values (pre burn in)
+    pre_networks = Dict()
 
-    matched_networks = copy(realised_networks)
-
-    # Use first realised PFIM network as reference
-    ref_name, ref_net = first(realised_networks)
-
-    println("\n========================================")
-    println("Generating niche model")
-    println("Reference: $ref_name")
-    println("========================================")
-
-    target_S = ref_net.S + 7
-    target_C = ref_net.C
-
-    # latent correction for burn-in loss
-    C_latent = target_C / link_retention
-
-    println("Target S: $target_S")
-    println("Target C: $target_C → Latent C: $C_latent")
-
-    # Skip this replicate if no PFIM network successfully realised
-    if target_C > 0.5
-        @warn "Iteration $i: Co too high. Skipping."
-        continue
-    end
-
-    niche_fw = Foodweb(
-        :niche;
-        S=target_S,
-        C=C_latent
+    pre_networks["niche"] = (
+        S = size(pfim_cont, 1),
+        C = C_targ
     )
-
-    niche_realised = realise_network(
-        Matrix(niche_fw.A);
-        t=t,
-        threshold=survival_threshold
+    pre_networks["down"] = (
+        S = size(pfim_down, 1),
+        C = sum(pfim_down) / (size(pfim_down, 1)^2)
     )
-
-    if niche_realised !== nothing
-        matched_networks["niche"] = niche_realised
-    else
-        @warn "Niche model failed"
-    end
+    pre_networks["down_size"] = (
+        S = size(pfim_down_size, 1),
+        C = sum(pfim_down_size) / (size(pfim_down_size, 1)^2)
+    )
 
     # --- 6. Run simulations ---
 
-    for (net_name, realised) in matched_networks
+    for (net_name, realised) in realised_networks
 
         A = realised.A
         params = realised.params
@@ -255,8 +259,10 @@ for i in 1:n_networks
         row = Dict(
             :net_id => i,
             :net_type => net_name,
-            :S => length(survivors),
-            :C => sum(A) / (length(survivors)^2)
+            :S_final => length(survivors),
+            :C_final => sum(A) / (length(survivors)^2),
+            :C_initial => pre_networks[net_name].C,
+            :S_initial => pre_networks[net_name].S
         )
 
         for (k, v) in R_topo
