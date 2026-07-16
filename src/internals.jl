@@ -133,26 +133,26 @@ function run_topological_extinctions(N, params)
     results = Dict()
 
     scenarios = Dict(
-       # "degree_high"   => extinction(N, "degree", true),
-       # "degree_low"    => extinction(N, "degree", false),
-       # "vul_high"      => extinction(N, "vulnerability", true),
-       # "vul_low"       => extinction(N, "vulnerability", false),
-       # "gen_high"      => extinction(N, "generality", true),
-       # "gen_low"       => extinction(N, "generality", false),
-        "bm_high"       => extinction(N, Symbol.(sortperm(params.body_mass, rev=true))),
-        "bm_low"        => extinction(N, Symbol.(sortperm(params.body_mass, rev=false))),
-        "rand_basal"    => extinction(N; protect = :consumer),
-        "rand_consumer" => extinction(N; protect = :basal)
+        # "degree_high"   => extinction(N, "degree", true),
+        # "degree_low"    => extinction(N, "degree", false),
+        # "vul_high"      => extinction(N, "vulnerability", true),
+        # "vul_low"       => extinction(N, "vulnerability", false),
+        # "gen_high"      => extinction(N, "generality", true),
+        # "gen_low"       => extinction(N, "generality", false),
+        "bm_high" => extinction(N, Symbol.(sortperm(params.body_mass, rev=true))),
+        "bm_low" => extinction(N, Symbol.(sortperm(params.body_mass, rev=false))),
+        "rand_basal" => extinction(N; protect=:consumer),
+        "rand_consumer" => extinction(N; protect=:basal)
     )
 
     for (name, Ns) in scenarios
 
         # primary = 1 species removed per step
-        primary_counts = collect(0:length(Ns)-1)
+        primary_counts = collect(0:(length(Ns)-1))
 
         results[name] = (
-            networks = Ns,
-            primary = primary_counts
+            networks=Ns,
+            primary=primary_counts
         )
     end
 
@@ -206,12 +206,12 @@ At each step:
 - This corresponds to the dynamical approach in the Curtsdottir 2011
 """
 function dynamic_extinction_adaptive(params, B0;
-    criterion = :degree,
-    descending = true,
-    t = 5000,
-    survival_threshold = 1e-12,
-    show_progress = true,
-    debug = false
+    criterion=:degree,
+    descending=true,
+    t=5000,
+    survival_threshold=1e-12,
+    show_progress=true,
+    debug=false
 )
 
     S0 = length(B0)
@@ -257,8 +257,8 @@ function dynamic_extinction_adaptive(params, B0;
         A_sub = A[alive_idx, alive_idx]
 
         vuln = vec(sum(A_sub, dims=1))
-        gen  = vec(sum(A_sub, dims=2))
-        deg  = vuln .+ gen
+        gen = vec(sum(A_sub, dims=2))
+        deg = vuln .+ gen
 
         # --- SELECT SPECIES ---
         if criterion == :random_basal
@@ -325,16 +325,16 @@ function dynamic_extinction_adaptive(params, B0;
         params_sim = default_model(
             fw,
             BodyMass(M_sim),
-            ClassicResponse(; 
-                            h = params.h,
-                            #c = params.intraspecific_interference[1],
-                            ),
+            ClassicResponse(;
+                h=params.h,
+                #c = params.intraspecific_interference[1],
+            ),
         )
 
         try
             sol = simulate(params_sim, B_sim, t;
-                show_degenerated = false,
-                callback = CallbackSet(
+                show_degenerated=false,
+                callback=CallbackSet(
                     extinction_callback(params_sim, survival_threshold)
                 )
             )
@@ -371,8 +371,8 @@ function dynamic_extinction_adaptive(params, B0;
     end
 
     return (
-        networks = Nseq,
-        primary = primary_counts
+        networks=Nseq,
+        primary=primary_counts
     )
 end
 
@@ -410,9 +410,9 @@ function run_dynamic_extinctions(params, B; show_progress=true)
         #("vul_low",       :vulnerability, false),
         #("gen_high",      :generality, true),
         #("gen_low",       :generality, false),
-        ("bm_high",       :bodymass, true),
-        ("bm_low",        :bodymass, false),
-        ("rand_basal",    :random_basal, true),
+        ("bm_high", :bodymass, true),
+        ("bm_low", :bodymass, false),
+        ("rand_basal", :random_basal, true),
         ("rand_consumer", :random_consumer, true)
     ]
 
@@ -422,9 +422,9 @@ function run_dynamic_extinctions(params, B; show_progress=true)
 
         results[name] = dynamic_extinction_adaptive(
             params, B;
-            criterion = crit,
-            descending = desc,
-            show_progress = show_progress
+            criterion=crit,
+            descending=desc,
+            show_progress=show_progress
         )
 
         if show_progress
@@ -497,7 +497,7 @@ function extinction_breakdown(result)
     primary_counts = result.primary
 
     if isempty(Ns)
-        return NaN   
+        return NaN
     end
 
     n = min(length(Ns), length(primary_counts))
@@ -539,9 +539,9 @@ function extinction_breakdown(result)
     end
 
     return (
-        primary = primary_prop,
-        secondary = secondary_prop,
-        total = total_loss
+        primary=primary_prop,
+        secondary=secondary_prop,
+        total=total_loss
     )
 end
 
@@ -552,28 +552,28 @@ function export_curves(curves_dict, type_label, net_id)
     for (scenario, c) in curves_dict
 
         if !hasproperty(c, :total)
-        
+
             rows = DataFrame(
-                net_id = Int[],
-                type = String[],
-                scenario = String[],
-                step = Union{Missing, Int}[],
-                primary = Union{Missing, Float64}[],
-                secondary = Union{Missing, Float64}[],
-                total = Union{Missing, Float64}[]
+                net_id=Int[],
+                type=String[],
+                scenario=String[],
+                step=Union{Missing,Int}[],
+                primary=Union{Missing,Float64}[],
+                secondary=Union{Missing,Float64}[],
+                total=Union{Missing,Float64}[]
             )
-        
+
         else
             n = length(c.total)
-        
+
             append!(rows, DataFrame(
-                net_id = fill(net_id, n),
-                type = fill(type_label, n),
-                scenario = fill(scenario, n),
-                step = 1:n,
-                primary = c.primary,
-                secondary = c.secondary,
-                total = c.total
+                net_id=fill(net_id, n),
+                type=fill(type_label, n),
+                scenario=fill(scenario, n),
+                step=1:n,
+                primary=c.primary,
+                secondary=c.secondary,
+                total=c.total
             ))
         end
     end
@@ -609,9 +609,9 @@ R50 is defined as the proportion of species that must be removed
 - Uses step index as proxy for PDEL (as in topological approaches)
 """
 function robustness_integral(network_sequence::Vector{<:SpeciesInteractionNetwork})
-    
+
     if isempty(network_sequence)
-        return NaN   
+        return NaN
     end
 
     S = SpeciesInteractionNetworks.richness.(network_sequence)
@@ -643,7 +643,7 @@ function robustness_integral(network_sequence::Vector{<:SpeciesInteractionNetwor
     end
 
     return (length(S) - 1) / S0
-    
+
 end
 
 function robustness_auc(network_sequence)
@@ -651,15 +651,15 @@ function robustness_auc(network_sequence)
     S0 = S[1]
 
     frac = S ./ S0
-    x = (0:length(S)-1) ./ S0
+    x = (0:(length(S)-1)) ./ S0
 
-    return sum((frac[1:end-1] .+ frac[2:end]) ./ 2 .* diff(x))
+    return sum((frac[1:(end-1)] .+ frac[2:end]) ./ 2 .* diff(x))
 end
 
 function compute_trophic_levels(A)
-    
+
     S = size(A, 1) # Species richness.
-    out_degree = sum(A; dims = 2)
+    out_degree = sum(A; dims=2)
     D = -(A ./ out_degree) # Diet matrix.
     D[isnan.(D)] .= 0.0
     D[diagind(D)] .= 1.0 .- D[diagind(D)]
@@ -672,9 +672,9 @@ end
 
 function realise_network(
     A;
-    bodymasses = nothing,
-    t = 5000,
-    threshold = 1e-12
+    bodymasses=nothing,
+    t=5000,
+    threshold=1e-12
 )
 
     A_trans = Matrix(transpose(A))
@@ -685,8 +685,8 @@ function realise_network(
 
         params = default_model(
             fw,
-            BodyMass(; Z = 10),
-            ClassicResponse(; h = 2.0),
+            BodyMass(; Z=10),
+            ClassicResponse(; h=2.0),
         )
 
     else
@@ -694,7 +694,7 @@ function realise_network(
         params = default_model(
             fw,
             BodyMass(bodymasses),
-            ClassicResponse(; h = 2.0),
+            ClassicResponse(; h=2.0),
         )
 
     end
@@ -707,8 +707,8 @@ function realise_network(
         params,
         B0,
         t;
-        show_degenerated = false,
-        callback = CallbackSet(
+        show_degenerated=false,
+        callback=CallbackSet(
             extinction_callback(params, threshold)
         )
     )
@@ -729,13 +729,13 @@ function realise_network(
     C_real = L_real / S_real^2
 
     return (
-        A = final_adj,
-        params = params,
-        biomasses = final_biomasses,
-        survivors = survivors,
-        S = S_real,
-        L = L_real,
-        C = C_real
+        A=final_adj,
+        params=params,
+        biomasses=final_biomasses,
+        survivors=survivors,
+        S=S_real,
+        L=L_real,
+        C=C_real
     )
 end
 
@@ -751,8 +751,8 @@ function is_acceptable_match(
     realised,
     target_S,
     target_C;
-    S_tol = 2,
-    C_tol = 0.02
+    S_tol=2,
+    C_tol=0.02
 )
 
     return (
@@ -765,9 +765,9 @@ function find_matching_network(
     generator_function,
     target_S,
     target_C;
-    max_attempts = 1000,
-    S_tol = 2,
-    C_tol = 0.02
+    max_attempts=1000,
+    S_tol=2,
+    C_tol=0.02
 )
 
     best_candidate = nothing
@@ -784,8 +784,8 @@ function find_matching_network(
             realised,
             target_S,
             target_C;
-            S_tol = S_tol,
-            C_tol = C_tol
+            S_tol=S_tol,
+            C_tol=C_tol
         )
 
             println("Accepted match after $attempt attempts")
@@ -821,16 +821,16 @@ function generate_niche_network(
 
     niche_fw = Foodweb(
         :niche;
-        S = S_init,
-        C = C_init
+        S=S_init,
+        C=C_init
     )
 
     niche_A = Matrix(niche_fw.A)
 
     return realise_network(
         niche_A;
-        t = t,
-        threshold = survival_threshold
+        t=t,
+        threshold=survival_threshold
     )
 end
 
@@ -854,7 +854,28 @@ function generate_adbm_network(
 
     return realise_network(
         adbm_A;
-        t = t,
-        threshold = survival_threshold
+        t=t,
+        threshold=survival_threshold
     )
+end
+
+function get_trophic_class(A)
+    # vul: number of predators (summing columns, i.e., across rows for each column)
+    vul = vec(sum(A, dims=1))  
+    # gen: number of prey (summing rows, i.e., across columns for each row)
+    gen = vec(sum(A, dims=2))  
+
+    # Define the classification logic for a single species
+    classify(g, v) = if g == 0 && v > 0
+        :basal
+    elseif v == 0 && g > 0
+        :top
+    elseif v > 0 && g > 0
+        :intermediate
+    else
+        :isolated
+    end
+
+    # Broadcast the classify function over the gen and vul vectors
+    return classify.(gen, vul)
 end

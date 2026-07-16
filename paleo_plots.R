@@ -4,7 +4,7 @@ library(tidyverse)
 
 df <- read.csv("outputs/paleo_robustness_summaries.csv") %>%
   pivot_longer(
-    cols = -c(net_id, S, C, net_type),
+    cols = -c(net_id, S_final, C_final, C_initial, S_initial, net_type),
     names_to = c(".value", "scenario"),
     names_pattern = "^(topo|dyn)_(.*)$")
 
@@ -22,7 +22,7 @@ ggplot(df) +
   theme_classic()
 
 ggplot(df %>%
-         pivot_longer(-c(net_id, S, C, scenario, net_type),
+         pivot_longer(-c(net_id, S_final, C_final, C_initial, S_initial, scenario, net_type),
                       names_to = "extinction")) +
   geom_boxplot(aes(y = net_type,
                    x = value,
@@ -34,7 +34,7 @@ ggplot(df %>%
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 ggplot(df) +
-  geom_boxplot(aes(y = S,
+  geom_boxplot(aes(y = S_final,
                    x = net_type),
                colour = "#EAAA00") +
   theme_classic()
@@ -82,21 +82,26 @@ df %>%
   squad_up(scenario, net_type) %>%
   no_cap(mean_topo = mean(topo, na.rm = TRUE),
          mean_dyn = mean(dyn, na.rm = TRUE),
-         mean_C = mean(C),
-         mean_S = mean(S))
+         mean_C = mean(C_final),
+         mean_S = mean(S_final))
 
 summary(df)
 
 spp_df <- read.csv("outputs/paleo_species_metadata.csv")
 
-spp_df
+spp_df %>%
+  squad_up(net_type, net_id, tropic_class) %>%
+  tally() %>%
+  pivot_wider(names_from = tropic_class,
+              values_from = n) %>%
+  glow_up(S = rowSums(pick(basal:intermediate), na.rm = TRUE),
+          basal = basal/S,
+          top = top/S,
+          intermediate = intermediate/S)
+
 
 df %>%
-  vibe_check(net_type, S, C) %>%
-  unique()
-
-df %>%
-  vibe_check(-S, -C) %>%
+  vibe_check(-c(S_final, C_final, C_initial, S_initial)) %>%
   pivot_longer(cols = c(topo, dyn),
                names_to = "mechanism",
                values_to = "robustness") %>%
