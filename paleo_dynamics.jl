@@ -40,10 +40,12 @@ plankton = CSV.read("data/community_plankton.csv", DataFrame)
 
 # --- global params ---
 n_networks = 20
-t = 50
 survival_threshold = 1e-12
 C_min = 0.05
 C_max = 0.15
+
+# Define the t-values we want to test
+t_values = [50, 500]
 
 # --- Distributions ---
 C_dist = truncated(Normal(0.15, 0.05), C_min, C_max)
@@ -61,135 +63,166 @@ size_bounds = Dict(
 
 # MAIN LOOP
 
-for i in 1:n_networks
-    println(">>> Processing run $i of $n_networks...")
+# 1. Outer Loop: Iterate over different values of t
+for t in t_values
+    println("\n==========================================")
+    println(">>> Running experiment for t = $t ...")
+    println("==========================================\n")
 
-    # --- 1. Sample parameters & Body sizes ---
-    C_targ = rand(C_dist)
-    y = collect(String, traits.size)
+    # 2. Inner Loop: Process networks
+    for i in 1:n_networks
+        println(">>> Processing run $i of $n_networks (t = $t)...")
 
-    bodysize = [
-        begin
-            lo, hi = size_bounds[s]
-            rand(truncated(global_dist, lo, hi))
-        end
-        for s in y
-    ]
+        # --- 1. Sample parameters & Body sizes ---
+        C_targ = rand(C_dist)
+        y = collect(String, traits.size)
 
-    traits[!, :bodymass] = bodysize
-    traits.biomass = fill(missing, nrow(traits))
-    df = vcat(traits, plankton)
+        bodysize = [
+            begin
+                lo, hi = size_bounds[s]
+                rand(truncated(global_dist, lo, hi))
+            end
+            for s in y
+        ]
 
-    # --- 2. Biomass estimates ---
-    known = .!ismissing.(df.biomass)
-    b = -3/4
-    a = exp(mean(log.(df.biomass[known]) .- b .* log.(df.bodymass[known])))
-    predicted = df.bodymass .^ b
-    df.biomass[.!known] .= predicted[.!known]
-    biomass = float.(df.biomass)
+        traits[!, :bodymass] = bodysize
+        traits.biomass = fill(missing, nrow(traits))
+        df = vcat(traits, plankton)
 
-    # --- 3. Base Networks Generation (Creation) ---
-    mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
+        # --- 2. Biomass estimates ---
+        known = .!ismissing.(df.biomass)
+        b = -3/4
+        a = exp(mean(log.(df.biomass[known]) .- b .* log.(df.bodymass[known])))
+        predicted = df.bodymass .^ b
+        df.biomass[.!known] .= predicted[.!known]
+        biomass = float.(df.biomass)
 
-    pfim_cont = PFIM(df, feeding_rules; return_type=:matrix)
-    pfim_size = PFIM(df, feeding_rules; return_type=:matrix, size_col=:bodymass, num_size_rule=mass_rule)
+        # --- 3. Base Networks Generation (Creation) ---
+        mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
-    # Construct Foodweb objects directly
-    pfim_down = Foodweb(Matrix(transpose(downsample_network(pfim_cont, 2.5; target_co=C_targ, max_iter=100))))
-    pfim_down_size = Foodweb(Matrix(transpose(downsample_network(pfim_size, 2.5; target_co=C_targ, max_iter=100))))
-    niche_fw = Foodweb(:niche; S=size(pfim_cont, 1), C=C_targ)
+        pfim_cont = PFIM(df, feeding_rules; return_type=:matrix)
+        pfim_size = PFIM(df, feeding_rules; return_type=:matrix, size_col=:bodymass, num_size_rule=mass_rule)
 
-    prods = map(==("primary"), string.(df.tiering))
-    atn_fw = Foodweb(Matrix(transpose(lmatrix(df.species, df.bodymass, prods))))
+        # Construct Foodweb objects directly
+        pfim_down = Foodweb(Matrix(transpose(downsample_network(pfim_cont, 2.5; target_co=C_targ, max_iter=100))))
+        pfim_down_size = Foodweb(Matrix(transpose(downsample_network(pfim_size, 2.5; target_co=C_targ, max_iter=100))))
+        niche_fw = Foodweb(:niche; S=size(pfim_cont, 1), C=C_targ)
 
-    # Consolidate all initial networks into one dictionary
-    initial_networks = Dict(
-        "down" => pfim_down,
-        "down_size" => pfim_down_size,
-        "niche" => niche_fw,
-        "atn" => atn_fw
-    )
+        prods = map(==("primary"), string.(df.tiering))
+        atn_fw = Foodweb(Matrix(transpose(lmatrix(df.species, df.bodymass, prods))))
 
-    # Dictionary to keep initial S and C values for summary reference
-    creation_metrics = Dict()
-
-    for (net_name, fw) in initial_networks
-        S_init = size(fw.A, 1)
-        C_init = sum(fw.A) / (S_init^2)
-        creation_metrics[net_name] = (S=S_init, C=C_init)
-
-        # Extract Species Metadata at creation
-        record_species_stage!(species_metadata_store, i, net_name, "creation", fw.A, nothing)
-    end
-
-    # --- 4. Burn-In & Realisation ---
-    realised_networks = Dict()
-    for (net_name, fw) in initial_networks
-        realised = realise_network(
-            fw;
-            t=t,
-            threshold=survival_threshold
-        )
-        if realised !== nothing
-            realised_networks[net_name] = realised
-        end
-    end
-
-    # Skip this replicate iteration if no networks successfully survived burn-in
-    if isempty(realised_networks)
-        @warn "Iteration $i: no realised networks. Skipping."
-        continue
-    end
-
-    # --- 5. Run Simulations ---
-    for (net_name, realised) in realised_networks
-        A_realised = realised.A
-        params = realised.params
-        final_biomasses = realised.biomasses
-        survivors = realised.survivors
-
-        S_realised = length(survivors)
-        C_realised = sum(A_realised) / (S_realised^2)
-
-        # Stage 2: Extract Species Metadata Post Burn-in (Realised)
-        record_species_stage!(species_metadata_store, i, net_name, "post_burn_in", A_realised, params, survivors)
-
-        # Topological extinctions
-        N = build_network(A_realised)
-        topo_results = run_topological_extinctions(N, params)
-        R_topo = compute_robustness(topo_results)
-
-        topo_curves = Dict(k => extinction_breakdown(v) for (k, v) in topo_results)
-        topo_df = export_curves(topo_curves, "topo_$net_name", i)
-        append!(topo_curve_store, topo_df)
-
-        # Dynamic extinctions
-        dyn_results = run_dynamic_extinctions(params, final_biomasses; t=t)
-        R_dyn = compute_robustness(dyn_results)
-
-        dyn_curves = Dict(k => extinction_breakdown(v) for (k, v) in dyn_results)
-        dyn_df = export_curves(dyn_curves, "dyn_$net_name", i)
-        append!(dyn_curve_store, dyn_df)
-
-        # Compile Summary row
-        row = Dict(
-            :net_id => i,
-            :net_type => net_name,
-            :S_creation => creation_metrics[net_name].S,
-            :C_creation => creation_metrics[net_name].C,
-            :S_realised => S_realised,
-            :C_realised => C_realised,
+        # Consolidate all initial networks into one dictionary
+        initial_networks = Dict(
+            "down" => pfim_down,
+            "down_size" => pfim_down_size,
+            "niche" => niche_fw,
+            "atn" => atn_fw
         )
 
-        for (k, v) in R_topo
-            row[Symbol("topo_" * k)] = v
+        # Dictionary to keep initial S and C values for summary reference
+        creation_metrics = Dict()
+
+        for (net_name, fw) in initial_networks
+            S_init = size(fw.A, 1)
+            C_init = sum(fw.A) / (S_init^2)
+            creation_metrics[net_name] = (S=S_init, C=C_init)
+
+            # Extract Species Metadata at creation
+            # Create a temporary container for this specific record
+            temp_metadata = DataFrame()
+
+            # Let the function record metadata into our temporary DataFrame
+            record_species_stage!(temp_metadata, i, net_name, "creation", fw.A, nothing)
+
+            # Inject the current t-value into the temporary DataFrame
+            temp_metadata[!, :t_val] .= t
+
+            # Append the completed DataFrame to our global store
+            append!(species_metadata_store, temp_metadata, cols=:union)
         end
 
-        for (k, v) in R_dyn
-            row[Symbol("dyn_" * k)] = v
+        # --- 4. Burn-In & Realisation ---
+        realised_networks = Dict()
+        for (net_name, fw) in initial_networks
+            realised = realise_network(
+                fw;
+                t=t, # Using dynamic t from outer loop
+                threshold=survival_threshold
+            )
+            if realised !== nothing
+                realised_networks[net_name] = realised
+            end
         end
 
-        push!(rows, row)
+        # Skip this replicate iteration if no networks successfully survived burn-in
+        if isempty(realised_networks)
+            @warn "Iteration $i (t = $t): no realised networks. Skipping."
+            continue
+        end
+
+        # --- 5. Run Simulations ---
+        for (net_name, realised) in realised_networks
+            A_realised = realised.A
+            params = realised.params
+            final_biomasses = realised.biomasses
+            survivors = realised.survivors
+
+            S_realised = length(survivors)
+            C_realised = sum(A_realised) / (S_realised^2)
+
+            # Stage 2: Extract Species Metadata Post Burn-in (Realised)
+            # Create a temporary container for this specific record
+            temp_metadata = DataFrame()
+
+            # Let the function record metadata into our temporary DataFrame
+            record_species_stage!(temp_metadata, i, net_name, "post_burn_in", A_realised, params, survivors)
+
+            # Inject the current t-value into the temporary DataFrame
+            temp_metadata[!, :t_val] .= t
+
+            # Append the completed DataFrame to our global store
+            append!(species_metadata_store, temp_metadata, cols=:union)
+
+            # Topological extinctions
+            N = build_network(A_realised)
+            topo_results = run_topological_extinctions(N, params)
+            R_topo = compute_robustness(topo_results)
+
+            topo_curves = Dict(k => extinction_breakdown(v) for (k, v) in topo_results)
+            topo_df = export_curves(topo_curves, "topo_$net_name", i)
+            topo_df[!, :t_val] .= t # Record t in curve outputs
+            append!(topo_curve_store, topo_df)
+
+            # Dynamic extinctions (Using dynamic t from outer loop)
+            dyn_results = run_dynamic_extinctions(params, final_biomasses; t=t)
+            R_dyn = compute_robustness(dyn_results)
+
+            dyn_curves = Dict(k => extinction_breakdown(v) for (k, v) in dyn_results)
+            dyn_df = export_curves(dyn_curves, "dyn_$net_name", i)
+            dyn_df[!, :t_val] .= t # Record t in curve outputs
+            append!(dyn_curve_store, dyn_df)
+
+            # Compile Summary row
+            row = Dict(
+                :t_val => t, # Record t in the summaries
+                :net_id => i,
+                :net_type => net_name,
+                :S_creation => creation_metrics[net_name].S,
+                :C_creation => creation_metrics[net_name].C,
+                :S_realised => S_realised,
+                :C_realised => C_realised,
+            )
+
+            for (k, v) in R_topo
+                row[Symbol("topo_" * k)] = v
+            end
+
+            for (k, v) in R_dyn
+                row[Symbol("dyn_" * k)] = v
+            end
+
+            push!(rows, row)
+        end
     end
 end
 
@@ -197,6 +230,11 @@ end
 
 results_df = DataFrame(rows)
 all_curve_df = vcat(topo_curve_store, dyn_curve_store)
+
+# Ensure the t_val column exists on metadata before writing, handling creation step defaults
+if !("t_val" in names(species_metadata_store))
+    species_metadata_store[!, :t_val] .= missing
+end
 
 CSV.write("outputs/paleo_robustness_summaries.csv", results_df)
 CSV.write("outputs/paleo_extinction_curves.csv", all_curve_df)
