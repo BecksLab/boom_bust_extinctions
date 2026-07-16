@@ -171,27 +171,6 @@ for i in 1:n_networks
         dyn_df = export_curves(dyn_curves, "dyn_$net_name", i)
         append!(dyn_curve_store, dyn_df)
 
-        # Stage 3: Extract Species Metadata Post Dynamic Extinction
-        # We target the 'secondary' extinction survivors as standard
-        S_post_ext, C_post_ext = NaN, NaN
-        if haskey(dyn_results, "secondary")
-            post_ext_survivors = dyn_results["secondary"].survivors
-            S_post_ext = length(post_ext_survivors)
-
-            # Sub-block Connectance calculation
-            if S_post_ext > 0
-                A_post_ext = A_realised[post_ext_survivors, post_ext_survivors]
-                C_post_ext = sum(A_post_ext) / (S_post_ext^2)
-            else
-                C_post_ext = 0.0
-            end
-
-            record_species_stage!(
-                species_metadata_store, i, net_name, "post_extinction",
-                A_realised, params, post_ext_survivors
-            )
-        end
-
         # Compile Summary row
         row = Dict(
             :net_id => i,
@@ -200,8 +179,6 @@ for i in 1:n_networks
             :C_creation => creation_metrics[net_name].C,
             :S_realised => S_realised,
             :C_realised => C_realised,
-            :S_post_ext => S_post_ext,
-            :C_post_ext => C_post_ext
         )
 
         for (k, v) in R_topo
