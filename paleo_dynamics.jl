@@ -16,6 +16,7 @@ using DifferentialEquations
 using Distributions
 using EcologicalNetworksDynamics
 using Extinctions
+using FoodWebTools
 using JLD2
 using pfim
 using ProgressMeter
@@ -132,7 +133,7 @@ for i in 1:n_networks
         target_co=C_targ,
         max_iter=100)
 
-    # --- 4. create niche web ---
+    # --- 4. Create niche web ---
 
     # use target Co and richness of pfim web
     niche_fw = Foodweb(
@@ -140,6 +141,13 @@ for i in 1:n_networks
         S=size(pfim_cont, 1),
         C=C_targ
     )
+
+    # --- 5. Create ATN web ---
+
+    # Identify primary producers based on the 'tiering' column
+    prods = map(==("primary"), string.(traits.tiering))
+
+    atn_fw = lmatrix(traits.species, traits.bodymass, prods)
 
     # --- 5. Realised networks (burn-in) ---
 
@@ -165,6 +173,12 @@ for i in 1:n_networks
         threshold=survival_threshold
     )
 
+    atn_realised = realise_network(
+        atn_fw;
+        t=t,
+        threshold=survival_threshold
+    )
+
     if niche_realised !== nothing
         realised_networks["niche"] = niche_realised
     end
@@ -175,6 +189,10 @@ for i in 1:n_networks
 
     if pfim_down_size_realised !== nothing
         realised_networks["down_size"] = pfim_down_size_realised
+    end
+
+    if atn_realised !== nothing
+        realised_networks["atn"] = atn_realised
     end
 
     # Skip this replicate if no networks successfully realised
@@ -198,6 +216,10 @@ for i in 1:n_networks
         S = size(pfim_down_size, 1),
         C = sum(pfim_down_size) / (size(pfim_down_size, 1)^2)
     )
+    pre_networks["atn"] = (
+        S = size(atn_fw, 1),
+        C = sum(atn_fw) / (size(atn_fw, 1)^2)
+    )
 
     # --- 6. Run simulations ---
 
@@ -215,6 +237,7 @@ for i in 1:n_networks
         BM = params.M[survivors]
         TL = params.trophic.levels[survivors]
         MC = params.metabolic_class[survivors]
+        TC = get_trophic_class(A)
 
         species_df = DataFrame(
             net_id=fill(i, length(survivors)),
@@ -223,7 +246,8 @@ for i in 1:n_networks
             original_id=survivors,
             body_mass=BM,
             trophic_level=TL,
-            metabolic_class=MC
+            metabolic_class=MC,
+            tropic_class=TC
         )
 
         append!(species_store, species_df)
