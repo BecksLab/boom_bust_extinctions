@@ -65,7 +65,7 @@ size_bounds = Dict(
 
 # MAIN LOOP
 
-for i in 1:n_networks
+@showprogress for i in 1:n_networks
 
     # --- 0. Sample parameters ---
     C_targ = rand(C_dist)
@@ -101,7 +101,6 @@ for i in 1:n_networks
 
     biomass = float.(df.biomass)
 
-    select!(df, Not(:biomass, :bodymass))
 
     # --- 3. PFIM metawebs ---
 
@@ -116,7 +115,7 @@ for i in 1:n_networks
 
     # create metaweb - cont size
     pfim_size = PFIM(
-        traits,
+        df,
         feeding_rules;
         return_type=:matrix,
         size_col=:bodymass,
@@ -145,9 +144,9 @@ for i in 1:n_networks
     # --- 5. Create ATN web ---
 
     # Identify primary producers based on the 'tiering' column
-    prods = map(==("primary"), string.(traits.tiering))
+    prods = map(==("primary"), string.(df.tiering))
 
-    atn_fw = lmatrix(traits.species, traits.bodymass, prods)
+    atn_fw = lmatrix(df.species, df.bodymass, prods)
 
     # --- 5. Realised networks (burn-in) ---
 
@@ -201,24 +200,24 @@ for i in 1:n_networks
         continue
     end
 
-    # build mini df that has the initial richness and Co values (pre burn in)
+    # build mini df that has the initial richness and Co values (post burn in)
     pre_networks = Dict()
 
     pre_networks["niche"] = (
-        S = size(pfim_cont, 1),
-        C = C_targ
+        S = size(niche_realised.A, 1),
+        C = sum(niche_realised.A) / (size(niche_realised.A, 1)^2)
     )
     pre_networks["down"] = (
-        S = size(pfim_down, 1),
-        C = sum(pfim_down) / (size(pfim_down, 1)^2)
+        S = size(pfim_down_realised.A, 1),
+        C = sum(pfim_down_realised.A) / (size(pfim_down_realised.A, 1)^2)
     )
     pre_networks["down_size"] = (
-        S = size(pfim_down_size, 1),
-        C = sum(pfim_down_size) / (size(pfim_down_size, 1)^2)
+        S = size(pfim_down_size_realised.A, 1),
+        C = sum(pfim_down_size_realised.A) / (size(pfim_down_size_realised.A, 1)^2)
     )
     pre_networks["atn"] = (
-        S = size(atn_fw, 1),
-        C = sum(atn_fw) / (size(atn_fw, 1)^2)
+        S = size(atn_realised.A, 1),
+        C = sum(atn_realised.A) / (size(atn_realised.A, 1)^2)
     )
 
     # --- 6. Run simulations ---
