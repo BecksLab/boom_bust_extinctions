@@ -2,8 +2,7 @@
 Main workflow:
 - Generate PFIM reference networks
 - Assign body- and biomass
-- Burn-in PFIM networks
-- Generate ONE niche model matching the realised PFIM structure
+- Burn-in networks
 - Topological extinctions
 - Dynamic extinctions
 =#
@@ -32,25 +31,22 @@ Random.seed!(66)
 rows = Dict[]
 topo_curve_store = DataFrame()
 dyn_curve_store = DataFrame()
-species_store = DataFrame()
+species_metadata_store = DataFrame()
 
 # --- data ---
 traits = CSV.read("data/community.csv", DataFrame)
 feeding_rules = CSV.read("data/feeding_rules.csv", DataFrame)
-# import plankton df (note this also has ecogenie biomass)
 plankton = CSV.read("data/community_plankton.csv", DataFrame)
 
 # --- global params ---
 n_networks = 20
-t = 5000
+t = 50
 survival_threshold = 1e-12
 C_min = 0.05
 C_max = 0.15
 
-# --- Co distribution ---
-C_dist = truncated(Normal(0.15, 0.05), C_min, C_max);
-
-# --- body size distribution ---
+# --- Distributions ---
+C_dist = truncated(Normal(0.15, 0.05), C_min, C_max)
 global_dist = LogNormal(log(30), 1.5)
 
 size_bounds = Dict(
@@ -65,13 +61,11 @@ size_bounds = Dict(
 
 # MAIN LOOP
 
-@showprogress for i in 1:n_networks
+for i in 1:n_networks
+    println(">>> Processing run $i of $n_networks...")
 
-    # --- 0. Sample parameters ---
+    # --- 1. Sample parameters & Body sizes ---
     C_targ = rand(C_dist)
-
-    # --- 1. Body sizes ---
-
     y = collect(String, traits.size)
 
     bodysize = [
@@ -84,208 +78,130 @@ size_bounds = Dict(
 
     traits[!, :bodymass] = bodysize
     traits.biomass = fill(missing, nrow(traits))
-
     df = vcat(traits, plankton)
 
     # --- 2. Biomass estimates ---
-
     known = .!ismissing.(df.biomass)
-
     b = -3/4
-
     a = exp(mean(log.(df.biomass[known]) .- b .* log.(df.bodymass[known])))
-
     predicted = df.bodymass .^ b
-
     df.biomass[.!known] .= predicted[.!known]
-
     biomass = float.(df.biomass)
 
-
-    # --- 3. PFIM metawebs ---
-
+    # --- 3. Base Networks Generation (Creation) ---
     mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
-    # create metaweb - categorical
-    pfim_cont = PFIM(
-        df,
-        feeding_rules;
-        return_type=:matrix
-    )
+    pfim_cont = PFIM(df, feeding_rules; return_type=:matrix)
+    pfim_size = PFIM(df, feeding_rules; return_type=:matrix, size_col=:bodymass, num_size_rule=mass_rule)
 
-    # create metaweb - cont size
-    pfim_size = PFIM(
-        df,
-        feeding_rules;
-        return_type=:matrix,
-        size_col=:bodymass,
-        num_size_rule=mass_rule
-    )
+    # Construct Foodweb objects directly
+    pfim_down = Foodweb(Matrix(transpose(downsample_network(pfim_cont, 2.5; target_co=C_targ, max_iter=100))))
+    pfim_down_size = Foodweb(Matrix(transpose(downsample_network(pfim_size, 2.5; target_co=C_targ, max_iter=100))))
+    niche_fw = Foodweb(:niche; S=size(pfim_cont, 1), C=C_targ)
 
-    # --- 3. PFIM downsample ---
-
-    pfim_down = downsample_network(pfim_cont, 2.5;
-        target_co=C_targ,
-        max_iter=100)
-
-    pfim_down_size = downsample_network(pfim_size, 2.5;
-        target_co=C_targ,
-        max_iter=100)
-
-    # --- 4. Create niche web ---
-
-    # use target Co and richness of pfim web
-    niche_fw = Foodweb(
-        :niche;
-        S=size(pfim_cont, 1),
-        C=C_targ
-    )
-
-    # --- 5. Create ATN web ---
-
-    # Identify primary producers based on the 'tiering' column
     prods = map(==("primary"), string.(df.tiering))
+    atn_fw = Foodweb(Matrix(transpose(lmatrix(df.species, df.bodymass, prods))))
 
-    atn_fw = lmatrix(df.species, df.bodymass, prods)
+    # Consolidate all initial networks into one dictionary
+    initial_networks = Dict(
+        "down" => pfim_down,
+        "down_size" => pfim_down_size,
+        "niche" => niche_fw,
+        "atn" => atn_fw
+    )
 
-    # --- 5. Realised networks (burn-in) ---
+    # Dictionary to keep initial S and C values for summary reference
+    creation_metrics = Dict()
 
+    for (net_name, fw) in initial_networks
+        S_init = size(fw.A, 1)
+        C_init = sum(fw.A) / (S_init^2)
+        creation_metrics[net_name] = (S=S_init, C=C_init)
+
+        # Extract Species Metadata at creation
+        record_species_stage!(species_metadata_store, i, net_name, "creation", fw.A, nothing)
+    end
+
+    # --- 4. Burn-In & Realisation ---
     realised_networks = Dict()
-
-    pfim_down_realised = realise_network(
-        pfim_down;
-        t=t,
-        threshold=survival_threshold
-    )
-
-    pfim_down_size_realised = realise_network(
-        pfim_down_size;
-        #bodymasses = bodysize,
-        t=t,
-        threshold=survival_threshold
-    )
-
-    niche_realised = realise_network(
-        # this is ugly and janky AF!!
-        Matrix(transpose(Matrix(niche_fw.A)));
-        t=t,
-        threshold=survival_threshold
-    )
-
-    atn_realised = realise_network(
-        atn_fw;
-        t=t,
-        threshold=survival_threshold
-    )
-
-    if niche_realised !== nothing
-        realised_networks["niche"] = niche_realised
+    for (net_name, fw) in initial_networks
+        realised = realise_network(
+            fw;
+            t=t,
+            threshold=survival_threshold
+        )
+        if realised !== nothing
+            realised_networks[net_name] = realised
+        end
     end
 
-    if pfim_down_realised !== nothing
-        realised_networks["down"] = pfim_down_realised
-    end
-
-    if pfim_down_size_realised !== nothing
-        realised_networks["down_size"] = pfim_down_size_realised
-    end
-
-    if atn_realised !== nothing
-        realised_networks["atn"] = atn_realised
-    end
-
-    # Skip this replicate if no networks successfully realised
+    # Skip this replicate iteration if no networks successfully survived burn-in
     if isempty(realised_networks)
         @warn "Iteration $i: no realised networks. Skipping."
         continue
     end
 
-    # build mini df that has the initial richness and Co values (post burn in)
-    pre_networks = Dict()
-
-    pre_networks["niche"] = (
-        S = size(niche_realised.A, 1),
-        C = sum(niche_realised.A) / (size(niche_realised.A, 1)^2)
-    )
-    pre_networks["down"] = (
-        S = size(pfim_down_realised.A, 1),
-        C = sum(pfim_down_realised.A) / (size(pfim_down_realised.A, 1)^2)
-    )
-    pre_networks["down_size"] = (
-        S = size(pfim_down_size_realised.A, 1),
-        C = sum(pfim_down_size_realised.A) / (size(pfim_down_size_realised.A, 1)^2)
-    )
-    pre_networks["atn"] = (
-        S = size(atn_realised.A, 1),
-        C = sum(atn_realised.A) / (size(atn_realised.A, 1)^2)
-    )
-
-    # --- 6. Run simulations ---
-
+    # --- 5. Run Simulations ---
     for (net_name, realised) in realised_networks
-
-        A = realised.A
+        A_realised = realised.A
         params = realised.params
         final_biomasses = realised.biomasses
         survivors = realised.survivors
 
-        N = build_network(A)
+        S_realised = length(survivors)
+        C_realised = sum(A_realised) / (S_realised^2)
 
-        # species data
+        # Stage 2: Extract Species Metadata Post Burn-in (Realised)
+        record_species_stage!(species_metadata_store, i, net_name, "post_burn_in", A_realised, params, survivors)
 
-        BM = params.M[survivors]
-        TL = params.trophic.levels[survivors]
-        MC = params.metabolic_class[survivors]
-        TC = get_trophic_class(A)
-
-        species_df = DataFrame(
-            net_id=fill(i, length(survivors)),
-            net_type=fill(net_name, length(survivors)),
-            species_id=1:length(survivors),
-            original_id=survivors,
-            body_mass=BM,
-            trophic_level=TL,
-            metabolic_class=MC,
-            tropic_class=TC
-        )
-
-        append!(species_store, species_df)
-
-        # topological extinctions
-
+        # Topological extinctions
+        N = build_network(A_realised)
         topo_results = run_topological_extinctions(N, params)
         R_topo = compute_robustness(topo_results)
 
-        topo_curves = Dict(
-            k => extinction_breakdown(v)
-            for (k, v) in topo_results
-        )
-
+        topo_curves = Dict(k => extinction_breakdown(v) for (k, v) in topo_results)
         topo_df = export_curves(topo_curves, "topo_$net_name", i)
         append!(topo_curve_store, topo_df)
 
-        # dynamic extinctions
-
-        dyn_results = run_dynamic_extinctions(params, final_biomasses)
+        # Dynamic extinctions
+        dyn_results = run_dynamic_extinctions(params, final_biomasses; t=t)
         R_dyn = compute_robustness(dyn_results)
 
-        dyn_curves = Dict(
-            k => extinction_breakdown(v)
-            for (k, v) in dyn_results
-        )
-
+        dyn_curves = Dict(k => extinction_breakdown(v) for (k, v) in dyn_results)
         dyn_df = export_curves(dyn_curves, "dyn_$net_name", i)
         append!(dyn_curve_store, dyn_df)
 
-        # summary row
+        # Stage 3: Extract Species Metadata Post Dynamic Extinction
+        # We target the 'secondary' extinction survivors as standard
+        S_post_ext, C_post_ext = NaN, NaN
+        if haskey(dyn_results, "secondary")
+            post_ext_survivors = dyn_results["secondary"].survivors
+            S_post_ext = length(post_ext_survivors)
 
+            # Sub-block Connectance calculation
+            if S_post_ext > 0
+                A_post_ext = A_realised[post_ext_survivors, post_ext_survivors]
+                C_post_ext = sum(A_post_ext) / (S_post_ext^2)
+            else
+                C_post_ext = 0.0
+            end
+
+            record_species_stage!(
+                species_metadata_store, i, net_name, "post_extinction",
+                A_realised, params, post_ext_survivors
+            )
+        end
+
+        # Compile Summary row
         row = Dict(
             :net_id => i,
             :net_type => net_name,
-            :S_final => length(survivors),
-            :C_final => sum(A) / (length(survivors)^2),
-            :C_initial => pre_networks[net_name].C,
-            :S_initial => pre_networks[net_name].S
+            :S_creation => creation_metrics[net_name].S,
+            :C_creation => creation_metrics[net_name].C,
+            :S_realised => S_realised,
+            :C_realised => C_realised,
+            :S_post_ext => S_post_ext,
+            :C_post_ext => C_post_ext
         )
 
         for (k, v) in R_topo
@@ -300,11 +216,11 @@ size_bounds = Dict(
     end
 end
 
-# --- 7. Save outputs ---
+# --- 6. Save outputs ---
 
 results_df = DataFrame(rows)
 all_curve_df = vcat(topo_curve_store, dyn_curve_store)
 
 CSV.write("outputs/paleo_robustness_summaries.csv", results_df)
 CSV.write("outputs/paleo_extinction_curves.csv", all_curve_df)
-CSV.write("outputs/paleo_species_metadata.csv", species_store)
+CSV.write("outputs/paleo_species_metadata.csv", species_metadata_store)

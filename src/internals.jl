@@ -377,7 +377,7 @@ function dynamic_extinction_adaptive(params, B0;
 end
 
 """
-    run_dynamic_extinctions(params, B)
+    run_dynamic_extinctions(params, B; t=5000, show_progress=true)
 
 Run all adaptive dynamic extinction scenarios.
 
@@ -385,21 +385,14 @@ Run all adaptive dynamic extinction scenarios.
 - `params`: Model parameters
 - `B`: Initial biomasses after burn-in
 
+# Keyword Arguments
+- `t::Int`: Simulation duration after each primary deletion (passed to dynamic simulation)
+- `show_progress::Bool`
+
 # Returns
 - `Dict{String, Vector}`: Mapping scenario name → network sequence
-
-# Scenarios
-- Degree (high/low)
-- Vulnerability (high/low)
-- Generality (high/low)
-- Body mass (high/low)
-- Random removal (consumer/basal only)
-
-# Notes
-- Each scenario uses adaptive re-ranking at every step
-- Results are directly comparable to topological sequences
 """
-function run_dynamic_extinctions(params, B; show_progress=true)
+function run_dynamic_extinctions(params, B; t=5000, show_progress=true)
 
     results = Dict()
 
@@ -424,6 +417,7 @@ function run_dynamic_extinctions(params, B; show_progress=true)
             params, B;
             criterion=crit,
             descending=desc,
+            t=t,
             show_progress=show_progress
         )
 
@@ -671,15 +665,11 @@ function compute_trophic_levels(A)
 end
 
 function realise_network(
-    A;
+    fw;
     bodymasses=nothing,
     t=5000,
     threshold=1e-12
 )
-
-    A_trans = Matrix(transpose(A))
-
-    fw = Foodweb(A_trans)
 
     if isnothing(bodymasses)
 
@@ -699,7 +689,7 @@ function realise_network(
 
     end
 
-    S = size(A_trans, 1)
+    S = size(fw.A, 1)
 
     B0 = rand(Uniform(0.1, 1), S)
 
@@ -878,4 +868,33 @@ function get_trophic_class(A)
 
     # Broadcast the classify function over the gen and vul vectors
     return classify.(gen, vul)
+end
+
+# --- Helper Functions for Clean Extraction ---
+
+"""
+Helper to extract, package, and append species level metadata (TL & TC) 
+at different lifecycle stages.
+"""
+function record_species_stage!(store, run_id, net_name, stage, A, params, survivors=nothing)
+    S = size(A, 1)
+    indices = something(survivors, 1:S)
+    
+    # Safely get Trophic Levels if parameters are available
+    TL = (params !== nothing && hasproperty(params, :trophic)) ? params.trophic.levels[indices] : fill(NaN, length(indices))
+    
+    # Get Trophic Classes for the active matrix block
+    TC = get_trophic_class(A)
+    
+    # Package into a temporary DataFrame and append to store
+    df = DataFrame(
+        net_id = fill(run_id, length(indices)),
+        net_type = fill(net_name, length(indices)),
+        stage = fill(stage, length(indices)),
+        species_id = 1:length(indices),
+        original_id = indices,
+        trophic_level = TL,
+        trophic_class = TC
+    )
+    append!(store, df)
 end
