@@ -99,7 +99,6 @@ for t in t_values
         biomass = float.(df.biomass)
 
         # --- 3. Base Networks Generation (Creation) ---
-        # --- 3. Base Networks Generation (Creation) ---
         mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
         pfim_cont = PFIM(df, feeding_rules; return_type=:matrix)
@@ -115,7 +114,7 @@ for t in t_values
         niche_fw = Foodweb(:niche; S=size(pfim_cont, 1), C=C_targ)
 
         prods = map(==("primary"), string.(df.tiering))
-        atn_fw = Foodweb(Matrix(transpose(lmatrix(df.species, df.bodymass, prods))))
+        atn_fw = Foodweb(Matrix(transpose(lmatrix(df.species, df.bodymass, prods, threshold = 0.025))))
 
         # Consolidate all initial networks into one dictionary
         initial_networks = Dict(
@@ -139,7 +138,7 @@ for t in t_values
             temp_metadata = DataFrame()
 
             # Let the function record metadata into our temporary DataFrame
-            record_species_stage!(temp_metadata, i, net_name, "creation", fw.A, nothing)
+            record_species_stage!(temp_metadata, i, net_name, "creation", fw.A, nothing, biomass)
 
             # Inject the current t-value into the temporary DataFrame
             temp_metadata[!, :t_val] .= t
@@ -153,7 +152,7 @@ for t in t_values
         for (net_name, fw) in initial_networks
             realised = realise_network(
                 fw;
-                t=t, # Using dynamic t from outer loop
+                t=t,
                 threshold=survival_threshold
             )
             if realised !== nothing
@@ -182,7 +181,7 @@ for t in t_values
             temp_metadata = DataFrame()
 
             # Let the function record metadata into our temporary DataFrame
-            record_species_stage!(temp_metadata, i, net_name, "post_burn_in", A_realised, params, survivors)
+            record_species_stage!(temp_metadata, i, net_name, "post_burn_in", A_realised, params, survivors, final_biomasses)
 
             # Inject the current t-value into the temporary DataFrame
             temp_metadata[!, :t_val] .= t
