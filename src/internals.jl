@@ -876,12 +876,15 @@ end
 Helper to extract, package, and append species level metadata (TL & TC) 
 at different lifecycle stages.
 """
-function record_species_stage!(store, run_id, net_name, stage, A, params, survivors=nothing)
+function record_species_stage!(store, run_id, net_name, stage, A, params, survivors=nothing, biomasses=nothing)
     S = size(A, 1)
     indices = something(survivors, 1:S)
     
     # Safely get Trophic Levels if parameters are available
     TL = (params !== nothing && hasproperty(params, :trophic)) ? params.trophic.levels[indices] : fill(NaN, length(indices))
+
+    # Biomasses - if provided
+    BM = (biomasses !== nothing) ? biomasses[indices] : fill(NaN, length(indices))
     
     # Get Trophic Classes for the active matrix block
     TC = get_trophic_class(A)
@@ -894,7 +897,8 @@ function record_species_stage!(store, run_id, net_name, stage, A, params, surviv
         species_id = 1:length(indices),
         original_id = indices,
         trophic_level = TL,
-        trophic_class = TC
+        trophic_class = TC,
+        biomass = BM
     )
     append!(store, df)
 end
