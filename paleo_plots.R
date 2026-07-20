@@ -11,7 +11,7 @@ df <- read.csv("outputs/paleo_robustness_summaries.csv") %>%
     names_to = c(".value", "scenario"),
     names_pattern = "^(topo|dyn)_(.*)$")
 
-ggplot(df) +
+zggplot(df) +
   geom_point(aes(x = topo,
                  y = dyn,
                  shape = factor(t_val)),
@@ -25,14 +25,87 @@ ggplot(df) +
   ylim(0,0.5) +
   theme_classic()
 
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+
+# transform
+df_long <- df %>%
+  pivot_longer(
+    cols = c(topo, dyn),
+    names_to = "extinction",
+    values_to = "value"
+  ) %>%
+  mutate(
+    net_type = factor(net_type),
+    scenario = factor(scenario),
+    extinction = factor(extinction),
+    net_id = factor(net_id)
+  )
+
+# mixed effects model
+mod <- lmer(
+  value ~ net_type * scenario * extinction +
+    (1 | net_id),
+  data = df_long
+)
+
+anova(mod)
+summary(mod)
+
+# pairwise contrasts
+
+net_contrasts <- emmeans(
+  mod,
+  pairwise ~ net_type | scenario * extinction,
+  adjust = "tukey"
+)
+
+contrasts_df <- emmeans(
+  mod,
+  pairwise ~ net_type | scenario * extinction)$contrasts %>%
+  confint() %>% 
+  as.data.frame() %>%
+  glow_up(sig = if_else(lower.CL > 0 | upper.CL < 0, "sig", "ns"))
+
+names(contrasts_df)
+
+head(contrasts_df)
+
+pd <- position_dodge(width = 0.5)
+
+ggplot(
+  contrasts_df,
+  aes(
+    contrast,
+    estimate,
+    ymin = lower.CL,
+    ymax = upper.CL,
+    colour = extinction,
+    shape = sig
+  )
+) +
+  geom_hline(
+    yintercept = 0,
+    linetype = 2,
+    colour = "#DDCBA4"
+  ) +
+  geom_pointrange(position = pd,
+                  fill = "white") +
+  coord_flip() +
+  facet_wrap(~scenario) +
+  scale_shape_manual(values = c("ns" = 21, "sig" = 19)) +
+  scale_colour_manual(values = c(topo = "#046A38",dyn = "#FFB81C")) +
+  theme_classic()
+
 ggplot(df %>%
          pivot_longer(-c(net_id, scenario, net_type, t_val),
-                      names_to = "extinction") %>%
-         yeet(extinction == "dyn")) +
+                      names_to = "extinction")) +
   geom_boxplot(aes(x = net_type,
                    y = value,
-                   colour = factor(t_val))) +
-  scale_colour_manual(values = c("50" = "#046A38", "500" = "#FFB81C")) +
+                   colour = extinction)) +
+  scale_colour_manual(values = c("topo" = "#046A38", "dyn" = "#FFB81C")) +
   facet_wrap(vars(scenario)) +
   labs(y = "Robustness") +
   theme_classic() +
@@ -106,8 +179,8 @@ plot_trophClass <-
                           y = net_type,
                           fill = trophic_class),
                       alpha = 0.7) +
-  facet_grid(cols = vars(t_val),
-             rows = vars(stage)) +
+  facet_wrap(vars(stage),
+             ncol = 2) +
   scale_fill_manual(values = c("basal" = "#046A38", 
                                "intermediate" = "#FFB81C",
                                "top" = "#A6192E")) +
@@ -143,10 +216,33 @@ read.csv("outputs/paleo_robustness_summaries.csv") %>%
 (plot_primVsec +
   labs(title = "Primary vs Secondary extintions, colours donate different extinction approaches")) /
   (plot_trophClass +
-  labs(title = "Trophic classes of networks pre and post burn in. Burn-in/extinction time length is shown as columns")) +
+  labs(title = "Trophic classes of networks pre and post burn in")) +
   plot_layout(heights = c(2, 1))
 
 ggsave("figures/paleo_panel.png",
        width = 5000, 
        height = 6000, 
        units = "px", dpi = 500)
+
+read.csv("outputs/paleo_robustness_summaries.csv") %>%
+  vibe_check(C_creation, C_realised, net_type) %>%
+  pivot_longer(-net_type) %>%
+  ggplot() +
+  geom_boxplot(aes(y = value,
+                   x = name,
+                   colour = net_type)) +
+  labs(y = "Connectance",
+       x = "Time state") +
+  scale_colour_manual(values = c("#A4A6DE", "#35365E", "#DDCBA4", "#897D63", "pink")) +
+  theme_bw()
+
+spp_df %>%
+  ggplot() +
+  geom_density_ridges(aes(x = biomass,
+                          y = net_type,
+                          fill = trophic_class),
+                      alpha = 0.7) +
+  scale_fill_manual(values = c("basal" = "#046A38", 
+                               "intermediate" = "#FFB81C",
+                               "top" = "#A6192E")) +
+  theme_bw()
