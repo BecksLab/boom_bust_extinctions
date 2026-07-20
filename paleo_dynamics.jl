@@ -105,16 +105,16 @@ for t in t_values
         pfim_size = PFIM(df, feeding_rules; return_type=:matrix, size_col=:bodymass, num_size_rule=mass_rule)
 
         # Construct Foodweb objects directly
-        pfim_down = Foodweb(Matrix(transpose(downsample_network(pfim_cont, 2.5; target_co=C_targ, max_iter=100))))
-        pfim_down_size = Foodweb(Matrix(transpose(downsample_network(pfim_size, 2.5; target_co=C_targ, max_iter=100))))
+        pfim_down = Foodweb(Matrix(downsample_network(pfim_cont, 2.5; target_co=C_targ, max_iter=100)))
+        pfim_down_size = Foodweb(Matrix(downsample_network(pfim_size, 2.5; target_co=C_targ, max_iter=100)))
         
         # Create the Niche-Downsampled Network from pfim_cont
-        pfim_niche_down = Foodweb(Matrix(transpose(downsample_niche_network(pfim_cont, 1.0; target_co=C_targ, max_iter=100))))
+        pfim_niche_down = Foodweb(Matrix(downsample_niche_network(pfim_cont, 1.0; target_co=C_targ, max_iter=100)))
         
         niche_fw = Foodweb(:niche; S=size(pfim_cont, 1), C=C_targ)
 
         prods = map(==("primary"), string.(df.tiering))
-        atn_fw = Foodweb(Matrix(transpose(lmatrix(df.species, df.bodymass, prods, threshold = 0.025))))
+        atn_fw = Foodweb(lmatrix(df.species, df.bodymass, prods))
 
         # Consolidate all initial networks into one dictionary
         initial_networks = Dict(
@@ -131,6 +131,7 @@ for t in t_values
         for (net_name, fw) in initial_networks
             S_init = size(fw.A, 1)
             C_init = sum(fw.A) / (S_init^2)
+            Int_init = intervality(fw.A)
             creation_metrics[net_name] = (S=S_init, C=C_init)
 
             # Extract Species Metadata at creation
@@ -175,6 +176,7 @@ for t in t_values
 
             S_realised = length(survivors)
             C_realised = sum(A_realised) / (S_realised^2)
+            Int_realised = intervality(fA_realised)
 
             # Stage 2: Extract Species Metadata Post Burn-in (Realised)
             # Create a temporary container for this specific record
@@ -217,6 +219,8 @@ for t in t_values
                 :C_creation => creation_metrics[net_name].C,
                 :S_realised => S_realised,
                 :C_realised => C_realised,
+                :Int_init => Int_init,
+                :Int_realised => Int_realised
             )
 
             for (k, v) in R_topo
