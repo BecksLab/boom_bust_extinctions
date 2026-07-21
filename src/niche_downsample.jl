@@ -4,7 +4,7 @@ using LinearAlgebra
 # Helper Functions
 # ==============================================================================
 
-# Helper to calculate active species and current connectance (same as original)
+# Helper to calculate active species and current connectance
 function _get_downsample_metrics(mat::AbstractMatrix{Bool}, S::Int)
     active = sum(sum(mat, dims=1) .> 0 .|| sum(mat, dims=2)' .> 0)
     co = sum(mat) / (S^2)
