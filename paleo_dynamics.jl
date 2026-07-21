@@ -160,7 +160,7 @@ for t in t_values
         # --- 4. Burn-In & Realisation ---
         realised_networks = Dict()
         for (net_name, fw) in initial_networks
-            if net_name ∈ ["niche", "niche_down"]
+            if net_name ∈ ["niche", "down_niche"]
                 realised = realise_network(
                     fw;
                     t=t,
