@@ -103,31 +103,31 @@ for t in t_values
         # --- 3. Base Networks Generation (Creation) ---
         mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
-        #pfim_cont = PFIM(df, feeding_rules; return_type=:matrix)
-        pfim_size = PFIM(df, feeding_rules; return_type=:matrix, size_col=:bodymass, num_size_rule=mass_rule)
+        pfim_meta = PFIM(df, feeding_rules; return_type=:matrix)
+        #pfim_meta = PFIM(df, feeding_rules; return_type=:matrix, size_col=:bodymass, num_size_rule=mass_rule)
 
         # Construct Foodweb objects directly
         #pfim_down = Foodweb(Matrix(downsample_network(pfim_cont, 2.5; target_co=C_targ, max_iter=100)))
-        pfim_down_size = Foodweb(Matrix(downsample_network(pfim_size, 2.5; target_co=C_targ, max_iter=100)))
+        pfim_power_down = Foodweb(Matrix(downsample_network(pfim_meta, 2.5; target_co=C_targ, max_iter=300)))
 
         # Create the Niche-Downsampled Network from pfim_cont
-        pfim_niche_down = Foodweb(Matrix(downsample_niche_network(pfim_size, 1.0; target_co=C_targ, max_iter=100)))
+        pfim_niche_down = Foodweb(Matrix(downsample_niche_network(pfim_meta, 1.0; target_co=C_targ, max_iter=300)))
 
         # Create the degree-Downsampled Network from pfim_cont
-        pfim_link_down = Foodweb(Matrix(downsample_degree_product_network(pfim_size; target_co=C_targ, max_iter=100)))
+        pfim_link_down = Foodweb(Matrix(downsample_degree_product_network(pfim_meta; target_co=C_targ, max_iter=300)))
 
         # Create the random-Downsampled Network from pfim_cont
-        pfim_rand_down = Foodweb(Matrix(downsample_random_network(pfim_size; target_co=C_targ, max_iter=100)))
+        pfim_rand_down = Foodweb(Matrix(downsample_random_network(pfim_meta; target_co=C_targ, max_iter=300)))
 
-        niche_fw = Foodweb(:niche; S=size(pfim_size, 1), C=C_targ)
+        niche_fw = Foodweb(:niche; S=size(pfim_meta, 1), C=C_targ)
 
         prods = map(==("primary"), string.(df.tiering))
-        atn_fw = Foodweb(lmatrix(df.species, df.bodymass, prods))
+        atn_fw = Foodweb(lmatrix(df.species, df.bodymass, prods; threshold = 0.06))
 
         # Consolidate all initial networks into one dictionary
         initial_networks = Dict(
             "down_link" => pfim_link_down,
-            "down_power" => pfim_down_size,
+            "down_power" => pfim_power_down,
             "down_niche" => pfim_niche_down,
             "down_rand" =>  pfim_rand_down,
             "niche" => niche_fw,
@@ -160,20 +160,26 @@ for t in t_values
         # --- 4. Burn-In & Realisation ---
         realised_networks = Dict()
         for (net_name, fw) in initial_networks
+
+            # create initial biomass from uniform rand dist
+            B_init = rand(size(fw.A, 1))
+
             if net_name ∈ ["niche", "down_niche"]
                 realised = realise_network(
                     fw;
                     t=t,
-                    threshold=survival_threshold
+                    threshold=survival_threshold,
+                    B0=B_init
                 )
             else
                 realised = realise_network(
                     fw;
                     bodymasses=df.bodymass,
                     t=t,
-                    threshold=survival_threshold
+                    threshold=survival_threshold,
+                    B0=B_init
                 )
-
+            
             end
             if realised !== nothing
                 realised_networks[net_name] = realised
@@ -234,6 +240,7 @@ for t in t_values
                 :t_val => t, # Record t in the summaries
                 :net_id => i,
                 :net_type => net_name,
+                :C_target => C_targ,
                 :S_creation => creation_metrics[net_name].S,
                 :C_creation => creation_metrics[net_name].C,
                 :S_realised => S_realised,

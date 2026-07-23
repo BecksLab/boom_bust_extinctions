@@ -133,13 +133,13 @@ function run_topological_extinctions(N, params)
     results = Dict()
 
     scenarios = Dict(
-        # "degree_high"   => extinction(N, "degree", true),
-        # "degree_low"    => extinction(N, "degree", false),
-        # "vul_high"      => extinction(N, "vulnerability", true),
-        # "vul_low"       => extinction(N, "vulnerability", false),
-        # "gen_high"      => extinction(N, "generality", true),
-        # "gen_low"       => extinction(N, "generality", false),
-        "bm_high" => extinction(N, Symbol.(sortperm(params.body_mass, rev=true))),
+        "degree_high" => extinction(N, "degree", true),
+        #"degree_low"    => extinction(N, "degree", false),
+        #"vul_high"      => extinction(N, "vulnerability", true),
+        #"vul_low"       => extinction(N, "vulnerability", false),
+        #"gen_high"      => extinction(N, "generality", true),
+        #"gen_low"       => extinction(N, "generality", false),
+        #"bm_high" => extinction(N, Symbol.(sortperm(params.body_mass, rev=true))),
         "bm_low" => extinction(N, Symbol.(sortperm(params.body_mass, rev=false))),
         "rand_basal" => extinction(N; protect=:consumer),
         "rand_consumer" => extinction(N; protect=:basal)
@@ -397,13 +397,13 @@ function run_dynamic_extinctions(params, B; t=5000, show_progress=true)
     results = Dict()
 
     scenarios = [
-        #("degree_high",   :degree, true),
+        ("degree_high", :degree, true),
         #("degree_low",    :degree, false),
         #("vul_high",      :vulnerability, true),
         #("vul_low",       :vulnerability, false),
         #("gen_high",      :generality, true),
         #("gen_low",       :generality, false),
-        ("bm_high", :bodymass, true),
+        #("bm_high", :bodymass, true),
         ("bm_low", :bodymass, false),
         ("rand_basal", :random_basal, true),
         ("rand_consumer", :random_consumer, true)
@@ -668,7 +668,8 @@ function realise_network(
     fw;
     bodymasses=nothing,
     t=5000,
-    threshold=1e-12
+    threshold=1e-12,
+    B0
 )
 
     if isnothing(bodymasses)
@@ -691,15 +692,14 @@ function realise_network(
 
     S = size(fw.A, 1)
 
-    B0 = rand(Uniform(0.1, 1), S)
-
     sol = simulate(
         params,
         B0,
         t;
         show_degenerated=false,
         callback=CallbackSet(
-            extinction_callback(params, threshold)
+            extinction_callback(params, survival_threshold),
+            TerminateSteadyState(1e-14, 1e-12, DiffEqCallbacks.allDerivPass),
         )
     )
 
@@ -731,20 +731,21 @@ end
 
 function get_trophic_class(A)
     # vul: number of predators (summing columns, i.e., across rows for each column)
-    vul = vec(sum(A, dims=1))  
+    vul = vec(sum(A, dims=1))
     # gen: number of prey (summing rows, i.e., across columns for each row)
-    gen = vec(sum(A, dims=2))  
+    gen = vec(sum(A, dims=2))
 
     # Define the classification logic for a single species
-    classify(g, v) = if g == 0 && v > 0
-        :basal
-    elseif v == 0 && g > 0
-        :top
-    elseif v > 0 && g > 0
-        :intermediate
-    else
-        :isolated
-    end
+    classify(g, v) =
+        if g == 0 && v > 0
+            :basal
+        elseif v == 0 && g > 0
+            :top
+        elseif v > 0 && g > 0
+            :intermediate
+        else
+            :isolated
+        end
 
     # Broadcast the classify function over the gen and vul vectors
     return classify.(gen, vul)
@@ -759,26 +760,26 @@ at different lifecycle stages.
 function record_species_stage!(store, run_id, net_name, stage, A, params, survivors=nothing, biomasses=nothing)
     S = size(A, 1)
     indices = something(survivors, 1:S)
-    
+
     # Safely get Trophic Levels if parameters are available
     TL = (params !== nothing && hasproperty(params, :trophic)) ? params.trophic.levels[indices] : fill(NaN, length(indices))
 
     # Biomasses - if provided
     BM = (biomasses !== nothing) ? biomasses[indices] : fill(NaN, length(indices))
-    
+
     # Get Trophic Classes for the active matrix block
     TC = get_trophic_class(A)
-    
+
     # Package into a temporary DataFrame and append to store
     df = DataFrame(
-        net_id = fill(run_id, length(indices)),
-        net_type = fill(net_name, length(indices)),
-        stage = fill(stage, length(indices)),
-        species_id = 1:length(indices),
-        original_id = indices,
-        trophic_level = TL,
-        trophic_class = TC,
-        biomass = BM
+        net_id=fill(run_id, length(indices)),
+        net_type=fill(net_name, length(indices)),
+        stage=fill(stage, length(indices)),
+        species_id=1:length(indices),
+        original_id=indices,
+        trophic_level=TL,
+        trophic_class=TC,
+        biomass=BM
     )
     append!(store, df)
 end
