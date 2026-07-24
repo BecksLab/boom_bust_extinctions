@@ -35,6 +35,15 @@ rows = Dict[]
 topo_curve_store = DataFrame()
 dyn_curve_store = DataFrame()
 species_metadata_store = DataFrame()
+adjacency_store = DataFrame(
+    t=Int[],
+    net_id=Int[],
+    net_type=String[],
+    stage=String[],
+    S=Int[],
+    C=Float64[],
+    adjacency=Any[]
+)
 
 # --- data ---
 traits = CSV.read("data/community.csv", DataFrame)
@@ -43,7 +52,7 @@ plankton = CSV.read("data/community_plankton.csv", DataFrame)
 
 # --- global params ---
 n_networks = 20
-survival_threshold = 1e-12 
+survival_threshold = 1e-12
 C_min = 0.05
 C_max = 0.15
 
@@ -122,16 +131,17 @@ for t in t_values
         niche_fw = Foodweb(:niche; S=size(pfim_meta, 1), C=C_targ)
 
         prods = map(==("primary"), string.(df.tiering))
-        atn_fw = Foodweb(lmatrix(df.species, df.bodymass, prods; threshold = 0.06))
+        atn_fw = Foodweb(lmatrix(df.species, df.bodymass, prods; threshold=0.06))
 
         # Consolidate all initial networks into one dictionary
         initial_networks = Dict(
             "down_link" => pfim_link_down,
             "down_power" => pfim_power_down,
             "down_niche" => pfim_niche_down,
-            "down_rand" =>  pfim_rand_down,
+            "down_rand" => pfim_rand_down,
             "niche" => niche_fw,
-            "atn" => atn_fw
+            "atn" => atn_fw,
+            "metaweb" => Foodweb(pfim_meta)
         )
 
         # Dictionary to keep initial S and C values for summary reference
@@ -155,6 +165,17 @@ for t in t_values
 
             # Append the completed DataFrame to our global store
             append!(species_metadata_store, temp_metadata, cols=:union)
+
+            # Save the adjacency matrix as well
+            push!(adjacency_store, (
+                t=t,
+                net_id=i,
+                net_type=net_name,
+                stage="creation",
+                S=size(fw.A, 1),
+                C=sum(fw.A) / size(fw.A, 1)^2,
+                adjacency=copy(fw.A)
+            ))
         end
 
         # --- 4. Burn-In & Realisation ---
@@ -164,7 +185,8 @@ for t in t_values
             # create initial biomass from uniform rand dist
             B_init = rand(size(fw.A, 1))
 
-            if net_name ∈ ["niche", "down_niche"]
+            # we treat this model set as not having prior biomasses
+            if net_name ∈ ["niche", "down_niche", "metaweb"]
                 realised = realise_network(
                     fw;
                     t=t,
@@ -179,7 +201,7 @@ for t in t_values
                     threshold=survival_threshold,
                     B0=B_init
                 )
-            
+
             end
             if realised !== nothing
                 realised_networks[net_name] = realised
@@ -202,6 +224,17 @@ for t in t_values
             S_realised = length(survivors)
             C_realised = sum(A_realised) / (S_realised^2)
             Int_realised = intervality(A_realised)
+
+            # Save adj. matrix
+            push!(adjacency_store, (
+                t=t,
+                net_id=i,
+                net_type=net_name,
+                stage="burnin",
+                S=size(A_realised, 1),
+                C=sum(A_realised) / size(A_realised, 1)^2,
+                adjacency=copy(A_realised)
+            ))
 
             # Stage 2: Extract Species Metadata Post Burn-in (Realised)
             # Create a temporary container for this specific record
@@ -275,3 +308,4 @@ end
 CSV.write("outputs/paleo_robustness_summaries_bodysize.csv", results_df)
 CSV.write("outputs/paleo_extinction_curves_bodysize.csv", all_curve_df)
 CSV.write("outputs/paleo_species_metadata_bodysize.csv", species_metadata_store)
+JLD2.save_object("outputs/adjacency_matrices.jld2", adjacency_store)
