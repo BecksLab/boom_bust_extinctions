@@ -102,12 +102,15 @@ for t in t_values
         df = vcat(traits, plankton)
 
         # --- 2. Biomass estimates ---
-        known = .!ismissing.(df.biomass)
-        b = -3/4
-        a = exp(mean(log.(df.biomass[known]) .- b .* log.(df.bodymass[known])))
-        predicted = df.bodymass .^ b
-        df.biomass[.!known] .= predicted[.!known]
-        biomass = float.(df.biomass)
+        #known = .!ismissing.(df.biomass)
+        #b = -3/4
+        #a = exp(mean(log.(df.biomass[known]) .- b .* log.(df.bodymass[known])))
+        #predicted = df.bodymass .^ b
+        #df.biomass[.!known] .= predicted[.!known]
+        #biomass = float.(df.biomass)
+
+        # create initial biomass from uniform rand dist
+        B_init = rand(nrow(df))
 
         # --- 3. Base Networks Generation (Creation) ---
         mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
@@ -117,16 +120,16 @@ for t in t_values
 
         # Construct Foodweb objects directly
         #pfim_down = Foodweb(Matrix(downsample_network(pfim_cont, 2.5; target_co=C_targ, max_iter=100)))
-        pfim_power_down = Foodweb(Matrix(downsample_network(pfim_meta, 2.5; target_co=C_targ, max_iter=300)))
+        pfim_power_down = Foodweb(Matrix(downsample(pfim_meta, :powerlaw; y=2.5, target_co=C_targ, max_iter=300)))
 
         # Create the Niche-Downsampled Network from pfim_cont
-        pfim_niche_down = Foodweb(Matrix(downsample_niche_network(pfim_meta, 1.0; target_co=C_targ, max_iter=300)))
+        pfim_niche_down = Foodweb(Matrix(downsample(pfim_meta, :niche; sigma_scale=1.0, target_co=C_targ, max_iter=300)))
 
         # Create the degree-Downsampled Network from pfim_cont
-        pfim_link_down = Foodweb(Matrix(downsample_degree_product_network(pfim_meta; target_co=C_targ, max_iter=300)))
+        pfim_link_down = Foodweb(Matrix(downsample(pfim_meta, :degree; target_co=C_targ, max_iter=300)))
 
         # Create the random-Downsampled Network from pfim_cont
-        pfim_rand_down = Foodweb(Matrix(downsample_random_network(pfim_meta; target_co=C_targ, max_iter=300)))
+        pfim_rand_down = Foodweb(Matrix(downsample(pfim_meta, :random; target_co=C_targ, max_iter=300)))
 
         niche_fw = Foodweb(:niche; S=size(pfim_meta, 1), C=C_targ)
 
@@ -148,6 +151,8 @@ for t in t_values
         creation_metrics = Dict()
 
         for (net_name, fw) in initial_networks
+
+            # summary metrics
             S_init = size(fw.A, 1)
             C_init = sum(fw.A) / (S_init^2)
             Int_init = intervality(fw.A)
@@ -158,7 +163,7 @@ for t in t_values
             temp_metadata = DataFrame()
 
             # Let the function record metadata into our temporary DataFrame
-            record_species_stage!(temp_metadata, i, net_name, "creation", fw.A, nothing, biomass)
+            record_species_stage!(temp_metadata, i, net_name, "creation", fw.A, nothing, nothing, B_init)
 
             # Inject the current t-value into the temporary DataFrame
             temp_metadata[!, :t_val] .= t
@@ -176,14 +181,13 @@ for t in t_values
                 C=sum(fw.A) / size(fw.A, 1)^2,
                 adjacency=copy(fw.A)
             ))
+
         end
 
         # --- 4. Burn-In & Realisation ---
         realised_networks = Dict()
-        for (net_name, fw) in initial_networks
 
-            # create initial biomass from uniform rand dist
-            B_init = rand(size(fw.A, 1))
+        for (net_name, fw) in initial_networks
 
             # we treat this model set as not having prior biomasses
             if net_name ∈ ["niche", "down_niche", "metaweb"]
