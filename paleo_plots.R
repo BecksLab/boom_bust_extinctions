@@ -3,101 +3,17 @@ library(genzplyr)
 library(tidyverse)
 library(ggridges)
 library(patchwork)
-
-df <- read.csv("outputs/paleo_robustness_summaries.csv") %>%
-  vibe_check(!starts_with(c("C_", "S_"))) %>%
-  pivot_longer(
-    cols = -c(net_id, net_type, t_val),
-    names_to = c(".value", "scenario"),
-    names_pattern = "^(topo|dyn)_(.*)$")
-
-zggplot(df) +
-  geom_point(aes(x = topo,
-                 y = dyn,
-                 shape = factor(t_val)),
-             alpha = 0.6,
-             colour = "#EAAA00") +
-  geom_abline(slope = 1,
-              colour = "#A6192E") +
-  facet_grid(cols = vars(scenario), 
-             rows = vars(net_type)) +
-  xlim(0,0.5) +
-  ylim(0,0.5) +
-  theme_classic()
-
-library(tidyverse)
 library(lme4)
 library(lmerTest)
 library(emmeans)
 
-# transform
-df_long <- df %>%
+df <- read.csv("outputs/paleo_robustness_summaries_bodysize.csv") %>%
+  vibe_check(!starts_with(c("C_", "S_"))) %>%
   pivot_longer(
-    cols = c(topo, dyn),
-    names_to = "extinction",
-    values_to = "value"
-  ) %>%
-  mutate(
-    net_type = factor(net_type),
-    scenario = factor(scenario),
-    extinction = factor(extinction),
-    net_id = factor(net_id)
-  )
-
-# mixed effects model
-mod <- lmer(
-  value ~ net_type * scenario * extinction +
-    (1 | net_id),
-  data = df_long
-)
-
-anova(mod)
-summary(mod)
-
-# pairwise contrasts
-
-net_contrasts <- emmeans(
-  mod,
-  pairwise ~ net_type | scenario * extinction,
-  adjust = "tukey"
-)
-
-contrasts_df <- emmeans(
-  mod,
-  pairwise ~ net_type | scenario * extinction)$contrasts %>%
-  confint() %>% 
-  as.data.frame() %>%
-  glow_up(sig = if_else(lower.CL > 0 | upper.CL < 0, "sig", "ns"))
-
-names(contrasts_df)
-
-head(contrasts_df)
-
-pd <- position_dodge(width = 0.5)
-
-ggplot(
-  contrasts_df,
-  aes(
-    contrast,
-    estimate,
-    ymin = lower.CL,
-    ymax = upper.CL,
-    colour = extinction,
-    shape = sig
-  )
-) +
-  geom_hline(
-    yintercept = 0,
-    linetype = 2,
-    colour = "#DDCBA4"
-  ) +
-  geom_pointrange(position = pd,
-                  fill = "white") +
-  coord_flip() +
-  facet_wrap(~scenario) +
-  scale_shape_manual(values = c("ns" = 21, "sig" = 19)) +
-  scale_colour_manual(values = c(topo = "#046A38",dyn = "#FFB81C")) +
-  theme_classic()
+    cols = -c(net_id, net_type, t_val),
+    names_to = c(".value", "scenario"),
+    names_pattern = "^(topo|dyn)_(.*)$") %>%
+  na.omit()
 
 ggplot(df %>%
          pivot_longer(-c(net_id, scenario, net_type, t_val),
@@ -111,7 +27,7 @@ ggplot(df %>%
   theme_classic() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-curves_df <- read.csv("outputs/paleo_extinction_curves.csv") %>%
+curves_df <- read.csv("outputs/paleo_extinction_curves_bodysize.csv") %>%
   glow_up(
     net_type = str_remove(type, "^[^_]+_"),
     type = str_extract(type, "^[^_]+")
@@ -155,7 +71,7 @@ ggsave("figures/paleo_primVsec.png",
        height = 4000, 
        units = "px", dpi = 700)
 
-spp_df <- read.csv("outputs/paleo_species_metadata.csv")
+spp_df <- read.csv("outputs/paleo_species_metadata_bodysize.csv")
 
 plot_trophClass <-
   spp_df %>%
@@ -188,35 +104,47 @@ plot_trophClass <-
 
 plot_trophClass 
 
+spp_df %>%
+  yeet(stage != "creation")
+
 df %>%
   vibe_check(net_id, net_type) %>%
   distinct() %>%
   squad_up(net_type) %>%
-  tally()
+  no_cap(total_ids = n())
 
-read.csv("outputs/paleo_robustness_summaries.csv") %>%
+read.csv("outputs/paleo_robustness_summaries_bodysize.csv") %>%
   glow_up(spp_loss = S_creation - S_realised) %>%
   vibe_check(!starts_with(c("C_", "S_"))) %>%
   pivot_longer(
     cols = -c(net_id, net_type, spp_loss, t_val),
     names_to = c(".value", "scenario"),
     names_pattern = "^(topo|dyn)_(.*)$") %>%
+  na.omit() %>%
   ggplot() +
   geom_point(aes(x = spp_loss,
                  y = dyn,
-                 colour = net_type,
-                 size = t_val),
+                 colour = net_type),
              alpha = 0.7) +
   facet_wrap(vars(scenario)) +
   labs(y = "Robustness (dynamic extinction)",
        x = "Number of species lost in burn-in") +
-  scale_colour_manual(values = c("#A4A6DE", "#35365E", "#DDCBA4", "#897D63", "pink")) +
+  theme_bw()
+
+read.csv("outputs/paleo_robustness_summaries_bodysize.csv") %>%
+  glow_up(spp_loss = S_creation - S_realised) %>%
+  na.omit() %>%
+  ggplot() +
+  geom_boxplot(aes(y = spp_loss,
+                   x = net_type,
+                   colour = net_type)) +
+  labs(y = "Number of species lost in burn-in") +
   theme_bw()
 
 (plot_primVsec +
-  labs(title = "Primary vs Secondary extintions, colours donate different extinction approaches")) /
+    labs(title = "Primary vs Secondary extintions, colours denote different extinction approaches")) /
   (plot_trophClass +
-  labs(title = "Trophic classes of networks pre and post burn in")) +
+     labs(title = "Trophic classes of networks pre and post burn in")) +
   plot_layout(heights = c(2, 1))
 
 ggsave("figures/paleo_panel.png",
@@ -224,7 +152,7 @@ ggsave("figures/paleo_panel.png",
        height = 6000, 
        units = "px", dpi = 500)
 
-read.csv("outputs/paleo_robustness_summaries.csv") %>%
+read.csv("outputs/paleo_robustness_summaries_bodysize.csv") %>%
   vibe_check(C_creation, C_realised, net_type) %>%
   pivot_longer(-net_type) %>%
   ggplot() +
@@ -233,7 +161,17 @@ read.csv("outputs/paleo_robustness_summaries.csv") %>%
                    colour = net_type)) +
   labs(y = "Connectance",
        x = "Time state") +
-  scale_colour_manual(values = c("#A4A6DE", "#35365E", "#DDCBA4", "#897D63", "pink")) +
+  theme_bw()
+
+read.csv("outputs/paleo_robustness_summaries_bodysize.csv") %>%
+  vibe_check(S_creation, S_realised, net_type) %>%
+  pivot_longer(-net_type) %>%
+  ggplot() +
+  geom_boxplot(aes(y = value,
+                   x = name,
+                   colour = net_type)) +
+  labs(y = "Richness",
+       x = "Time state") +
   theme_bw()
 
 spp_df %>%
@@ -246,3 +184,26 @@ spp_df %>%
                                "intermediate" = "#FFB81C",
                                "top" = "#A6192E")) +
   theme_bw()
+
+# 'lost' networks - i.e. didn't survive burn in
+df %>%
+  vibe_check(net_id, net_type) %>%
+  distinct() %>%
+  glow_up(max_run = max(net_id)) %>%
+  squad_up(net_type) %>%
+  count(net_type)
+
+read.csv("outputs/paleo_robustness_summaries_bodysize.csv") %>%
+  yeet(net_type == "niche") %>%
+  ggplot() +
+  geom_density(aes(C_target))
+
+
+read.csv("outputs/paleo_robustness_summaries_bodysize.csv") %>%
+  ggplot() +
+  geom_point(aes(x=C_target,
+                 y= C_creation,
+                 colour=net_type))
+
+
+
