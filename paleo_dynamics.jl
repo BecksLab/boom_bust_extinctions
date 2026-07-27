@@ -23,9 +23,6 @@ using SpeciesInteractionNetworks
 using Statistics
 
 include("src/internals.jl")
-include("src/niche_downsample.jl")
-include("src/random_downsample.jl")
-include("src/link_downsample.jl")
 
 import Random
 Random.seed!(66)
@@ -163,7 +160,7 @@ for t in t_values
             temp_metadata = DataFrame()
 
             # Let the function record metadata into our temporary DataFrame
-            record_species_stage!(temp_metadata, i, net_name, "creation", fw.A, nothing, nothing, B_init)
+            record_species_stage!(temp_metadata, i, net_name, "creation", fw.A, df.bodymass, nothing, nothing, B_init)
 
             # Inject the current t-value into the temporary DataFrame
             temp_metadata[!, :t_val] .= t
@@ -245,7 +242,7 @@ for t in t_values
             temp_metadata = DataFrame()
 
             # Let the function record metadata into our temporary DataFrame
-            record_species_stage!(temp_metadata, i, net_name, "post_burn_in", A_realised, params, survivors, final_biomasses)
+            record_species_stage!(temp_metadata, i, net_name, "post_burn_in", A_realised, df.bodymass, params, survivors, final_biomasses)
 
             # Inject the current t-value into the temporary DataFrame
             temp_metadata[!, :t_val] .= t
