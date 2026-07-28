@@ -128,7 +128,7 @@ secondary extinctions occur via trophic disconnection (cascade mechanism).
 - No population dynamics are simulated
 - Fully comparable to classical topological robustness studies
 """
-function run_topological_extinctions(N, params)
+function run_topological_extinctions(N, body_mass)
 
     results = Dict()
 
@@ -139,8 +139,8 @@ function run_topological_extinctions(N, params)
         #"vul_low"       => extinction(N, "vulnerability", false),
         #"gen_high"      => extinction(N, "generality", true),
         #"gen_low"       => extinction(N, "generality", false),
-        #"bm_high" => extinction(N, Symbol.(sortperm(params.body_mass, rev=true))),
-        "bm_low" => extinction(N, Symbol.(sortperm(params.body_mass, rev=false))),
+        #"bm_high" => extinction(N, Symbol.(sortperm(body_mass, rev=true))),
+        "bm_low" => extinction(N, Symbol.(sortperm(body_mass, rev=false))),
         "rand_basal" => extinction(N; protect=:consumer),
         "rand_consumer" => extinction(N; protect=:basal)
     )
