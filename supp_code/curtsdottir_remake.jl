@@ -22,7 +22,7 @@ using SpeciesInteractionNetworks
 using Statistics
 
 # call internal functions
-include("src/internals.jl")
+include("../src/internals.jl")
 
 # set seed
 import Random
@@ -173,6 +173,6 @@ results_df = DataFrame(rows)
 all_curve_df = vcat(topo_curve_store, dyn_curve_store)
 
 # Write files
-CSV.write("outputs/robustness_summaries.csv", results_df)
-CSV.write("outputs/extinction_curves.csv", all_curve_df)
-CSV.write("outputs/species_metadata.csv", species_store)
+CSV.write("../outputs/robustness_summaries.csv", results_df)
+CSV.write("../outputs/extinction_curves.csv", all_curve_df)
+CSV.write("../outputs/species_metadata.csv", species_store)

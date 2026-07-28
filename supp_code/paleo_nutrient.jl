@@ -25,7 +25,7 @@ using SpeciesInteractionNetworks
 using Statistics
 using CairoMakie
 
-include("src/internals.jl")
+include("../src/internals.jl")
 
 import Random
 Random.seed!(66)
@@ -37,8 +37,8 @@ dyn_curve_store = DataFrame()
 species_store = DataFrame()
 
 # --- data ---
-traits = CSV.read("data/community_dolomites.csv", DataFrame)
-feeding_rules = CSV.read("data/feeding_rules.csv", DataFrame)
+traits = CSV.read("../data/community_dolomites.csv", DataFrame)
+feeding_rules = CSV.read("../data/feeding_rules.csv", DataFrame)
 
 # --- global params ---
 t = 5000
@@ -73,7 +73,7 @@ traits[!, :bodymass] = bodysize
 traits.biomass = fill(missing, nrow(traits))
 
 # import plankton df (note this also has ecogenie biomass)
-plankton = CSV.read("data/community_plankton.csv", DataFrame)
+plankton = CSV.read("../data/community_plankton.csv", DataFrame)
 
 df = vcat(traits, plankton)
 
@@ -216,4 +216,4 @@ end
 
 fig
 
-save("figures/paleo_nutrient_scenarios.png", fig)
+save("../figures/paleo_nutrient_scenarios.png", fig)

@@ -19,7 +19,7 @@ using CairoMakie
 # --- 2. Create synthetic nutrient scenarios ---
 
 # Load paleo nutrient data (kept for future use)
-ecogenie_raw = grdinterpolate("data/ecogenie.nc"; track = (103, 17));
+ecogenie_raw = grdinterpolate("../data/ecogenie.nc"; track = (103, 17));
 
 # Create synthetic nutrient scenarios for 5000 timesteps
 n_timesteps = 5000
@@ -173,4 +173,4 @@ Makie.lines!(ax, t, N2,
 
 axislegend(ax)
 
-save("figures/multi_nutrients.png", fig)
+save("../figures/multi_nutrients.png", fig)

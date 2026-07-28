@@ -2,7 +2,7 @@
 library(genzplyr)
 library(tidyverse)
 
-df <- read.csv("outputs/robustness_summaries.csv") %>%
+df <- read.csv("../outputs/robustness_summaries.csv") %>%
   pivot_longer(
     cols = -c(net_id, S, C),
     names_to = c(".value", "scenario"),
@@ -30,7 +30,7 @@ ggplot(df %>%
   theme_classic() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-curves_df <- read.csv("outputs/extinction_curves.csv")
+curves_df <- read.csv("../outputs/extinction_curves.csv")
 
 ggplot(curves_df) +
   geom_abline(slope = -1,
@@ -67,4 +67,4 @@ df %>%
 
 summary(df)
 
-spp_df <- read.csv("outputs/species_metadata.csv")
+spp_df <- read.csv("../outputs/species_metadata.csv")

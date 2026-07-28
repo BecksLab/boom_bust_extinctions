@@ -113,4 +113,4 @@ end
 
 fig
 
-save("figures/nutrient_scenarios.png", fig)
+save("../figures/nutrient_scenarios.png", fig)
