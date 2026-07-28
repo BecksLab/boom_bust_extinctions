@@ -295,4 +295,4 @@ end
 
 display(fig)
 
-save("figures/four_scenario_comparison.png", fig)
+save("../figures/four_scenario_comparison.png", fig)
