@@ -68,6 +68,7 @@ species_metadata_store = DataFrame()
 adjacency_store = DataFrame(
     t=Int[],
     net_id=Int[],
+    community=String[],
     net_type=String[],
     stage=String[],
     S=Int[],
@@ -78,12 +79,17 @@ adjacency_store = DataFrame(
 summary_rows = Dict[]
 
 # --- data ---
-traits = CSV.read("data/community.csv", DataFrame)
+communities = Dict("dolomites" => Dict(
+        "traits" => CSV.read("data/dolomites_community.csv", DataFrame),
+        "plankton" => CSV.read("data/dolomites_plankton.csv", DataFrame)
+    ), "russia" => Dict(
+        "traits" => CSV.read("data/russia_community.csv", DataFrame),
+        "plankton" => CSV.read("data/russia_plankton.csv", DataFrame)
+    ))
 feeding_rules = CSV.read("data/feeding_rules.csv", DataFrame)
-plankton = CSV.read("data/community_plankton.csv", DataFrame)
 
 # --- global params ---
-n_networks = 50  # number of runs per network
+n_networks = 30  # number of runs per network
 survival_threshold = 1e-12
 C_min = 0.05
 C_max = 0.15
@@ -109,225 +115,234 @@ size_bounds = Dict(
 # --- 2. Build and realise networks ---
 
 for t in t_values
-    println("\n==========================================")
-    println(">>> Running extinctions for t = $t ...")
-    println("==========================================\n")
 
     # 2. Inner Loop: Process networks
     for i in 1:n_networks
-        println(">>> Processing run $i of $n_networks (t = $t)...")
 
-        # --- 1. Sample parameters & Body sizes ---
         C_targ = rand(C_dist)
-        y = collect(String, traits.size)
 
-        bodysize = [
-            begin
-                lo, hi = size_bounds[s]
-                rand(truncated(global_dist, lo, hi))
-            end
-            for s in y
-        ]
+        for (community_name, community_data) in communities
 
-        traits[!, :bodymass] = bodysize
-        traits.biomass = fill(missing, nrow(traits))
-        df = vcat(traits, plankton)
+            traits = deepcopy(community_data["traits"])
+            plankton = deepcopy(community_data["plankton"])
 
-        # --- 2. Biomass estimates ---
-        #known = .!ismissing.(df.biomass)
-        #b = -3/4
-        #a = exp(mean(log.(df.biomass[known]) .- b .* log.(df.bodymass[known])))
-        #predicted = df.bodymass .^ b
-        #df.biomass[.!known] .= predicted[.!known]
-        #biomass = float.(df.biomass)
+            println(">>> Processing run $i of $n_networks (t = $t) for $community_name...")
 
-        # create initial biomass from uniform rand dist
-        B_init = rand(nrow(df))
+            # --- 1. Sample parameters & Body sizes ---
+            y = collect(String, traits.size)
 
-        # --- 3. Base Networks Generation (Creation) ---
-        mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
+            bodysize = [
+                begin
+                    lo, hi = size_bounds[s]
+                    rand(truncated(global_dist, lo, hi))
+                end
+                for s in y
+            ]
 
-        pfim_meta = PFIM(df, feeding_rules; return_type=:matrix)
-        #pfim_meta = PFIM(df, feeding_rules; return_type=:matrix, size_col=:bodymass, num_size_rule=mass_rule)
+            traits[!, :bodymass] = bodysize
+            traits.biomass = fill(missing, nrow(traits))
+            df = vcat(traits, plankton)
 
-        # Construct Foodweb objects directly
-        #pfim_down = Foodweb(Matrix(downsample_network(pfim_cont, 2.5; target_co=C_targ, max_iter=100)))
-        pfim_power_down = Foodweb(Matrix(downsample(pfim_meta, :powerlaw; y=2.5, target_co=C_targ, max_iter=300)))
+            # --- 2. Biomass estimates ---
+            #known = .!ismissing.(df.biomass)
+            #b = -3/4
+            #a = exp(mean(log.(df.biomass[known]) .- b .* log.(df.bodymass[known])))
+            #predicted = df.bodymass .^ b
+            #df.biomass[.!known] .= predicted[.!known]
+            #biomass = float.(df.biomass)
 
-        # Create the Niche-Downsampled Network from pfim_cont
-        pfim_niche_down = Foodweb(Matrix(downsample(pfim_meta, :niche; sigma_scale=1.0, target_co=C_targ, max_iter=300)))
+            # create initial biomass from uniform rand dist
+            B_init = rand(nrow(df))
 
-        # Create the degree-Downsampled Network from pfim_cont
-        pfim_link_down = Foodweb(Matrix(downsample(pfim_meta, :degree; target_co=C_targ, max_iter=300)))
+            # --- 3. Base Networks Generation (Creation) ---
+            mass_rule = (res, con) -> con >= 0.5 * res ? 1 : 0
 
-        # Create the random-Downsampled Network from pfim_cont
-        pfim_rand_down = Foodweb(Matrix(downsample(pfim_meta, :random; target_co=C_targ, max_iter=300)))
+            pfim_meta = PFIM(df, feeding_rules; return_type=:matrix)
+            #pfim_meta = PFIM(df, feeding_rules; return_type=:matrix, size_col=:bodymass, num_size_rule=mass_rule)
 
-        niche_fw = Foodweb(:niche; S=size(pfim_meta, 1), C=C_targ)
+            # Construct Foodweb objects directly
+            #pfim_down = Foodweb(Matrix(downsample_network(pfim_cont, 2.5; target_co=C_targ, max_iter=100)))
+            pfim_power_down = Foodweb(Matrix(downsample(pfim_meta, :powerlaw; y=2.5, target_co=C_targ, max_iter=300)))
 
-        prods = map(==("primary"), string.(df.tiering))
-        atn_fw = Foodweb(lmatrix(df.species, df.bodymass, prods; threshold=0.06))
+            # Create the Niche-Downsampled Network from pfim_cont
+            pfim_niche_down = Foodweb(Matrix(downsample(pfim_meta, :niche; sigma_scale=1.0, target_co=C_targ, max_iter=300)))
 
-        # Consolidate all initial networks into one dictionary
-        initial_networks = Dict(
-            "down_link" => pfim_link_down,
-            "down_power" => pfim_power_down,
-            "down_niche" => pfim_niche_down,
-            "down_rand" => pfim_rand_down,
-            "niche" => niche_fw,
-            "atn" => atn_fw,
-            "metaweb" => Foodweb(pfim_meta)
-        )
+            # Create the degree-Downsampled Network from pfim_cont
+            pfim_link_down = Foodweb(Matrix(downsample(pfim_meta, :degree; target_co=C_targ, max_iter=300)))
 
-        # Dictionary to keep initial S and C values for summary reference
-        creation_metrics = Dict()
+            # Create the random-Downsampled Network from pfim_cont
+            pfim_rand_down = Foodweb(Matrix(downsample(pfim_meta, :random; target_co=C_targ, max_iter=300)))
 
-        for (net_name, fw) in initial_networks
+            niche_fw = Foodweb(:niche; S=size(pfim_meta, 1), C=C_targ)
 
-            # summary metrics
-            S_init = size(fw.A, 1)
-            C_init = sum(fw.A) / (S_init^2)
-            creation_metrics[net_name] = (S=S_init, C=C_init)
+            prods = map(==("primary"), string.(df.tiering))
+            atn_fw = Foodweb(lmatrix(df.species, df.bodymass, prods; threshold=0.06))
 
-            # Extract Species Metadata at creation
-            # Create a temporary container for this specific record
-            temp_metadata = DataFrame()
+            # Consolidate all initial networks into one dictionary
+            initial_networks = Dict(
+                "down_link" => pfim_link_down,
+                "down_power" => pfim_power_down,
+                "down_niche" => pfim_niche_down,
+                "down_rand" => pfim_rand_down,
+                "niche" => niche_fw,
+                "atn" => atn_fw,
+                "metaweb" => Foodweb(pfim_meta)
+            )
 
-            # Let the function record metadata into our temporary DataFrame
-            record_species_stage!(temp_metadata, i, net_name, "creation", fw.A, df.bodymass, nothing, nothing, B_init)
+            # Dictionary to keep initial S and C values for summary reference
+            creation_metrics = Dict()
 
-            # Inject the current t-value into the temporary DataFrame
-            temp_metadata[!, :t_val] .= t
+            for (net_name, fw) in initial_networks
 
-            # Append the completed DataFrame to our global store
-            append!(species_metadata_store, temp_metadata, cols=:union)
+                # summary metrics
+                S_init = size(fw.A, 1)
+                C_init = sum(fw.A) / (S_init^2)
+                creation_metrics[net_name] = (S=S_init, C=C_init)
 
-            # Save the adjacency matrix as well
-            push!(adjacency_store, (
-                t=t,
-                net_id=i,
-                net_type=net_name,
-                stage="creation",
-                S=size(fw.A, 1),
-                C=sum(fw.A) / size(fw.A, 1)^2,
-                adjacency=copy(fw.A)
-            ))
+                # Extract Species Metadata at creation
+                # Create a temporary container for this specific record
+                temp_metadata = DataFrame()
 
-        end
+                # Let the function record metadata into our temporary DataFrame
+                record_species_stage!(temp_metadata, i, net_name, "creation", fw.A, df.bodymass, nothing, nothing, B_init)
 
-        # --- 4. Burn-In & Realisation ---
-        realised_networks = Dict()
+                # Inject the current t-value into the temporary DataFrame
+                temp_metadata[!, :t_val] .= t
+                temp_metadata[!, :community] .= community_name
 
-        for (net_name, fw) in initial_networks
+                # Append the completed DataFrame to our global store
+                append!(species_metadata_store, temp_metadata, cols=:union)
 
-            # we treat this model set as not having prior biomasses
-            if net_name ∈ ["niche", "down_niche", "metaweb"]
-                realised = realise_network(
-                    fw;
+                # Save the adjacency matrix as well
+                push!(adjacency_store, (
                     t=t,
-                    threshold=survival_threshold,
-                    B0=B_init
-                )
-            else
-                realised = realise_network(
-                    fw;
-                    bodymasses=df.bodymass,
+                    net_id=i,
+                    community=community_name,
+                    net_type=net_name,
+                    stage="creation",
+                    S=size(fw.A, 1),
+                    C=sum(fw.A) / size(fw.A, 1)^2,
+                    adjacency=copy(fw.A)
+                ))
+
+            end
+
+            # --- 4. Burn-In & Realisation ---
+            realised_networks = Dict()
+
+            for (net_name, fw) in initial_networks
+
+                # we treat this model set as not having prior biomasses
+                if net_name ∈ ["niche", "down_niche", "metaweb"]
+                    realised = realise_network(
+                        fw;
+                        t=t,
+                        threshold=survival_threshold,
+                        B0=B_init
+                    )
+                else
+                    realised = realise_network(
+                        fw;
+                        bodymasses=df.bodymass,
+                        t=t,
+                        threshold=survival_threshold,
+                        B0=B_init
+                    )
+
+                end
+                if realised !== nothing
+                    realised_networks[net_name] = realised
+                end
+            end
+
+            # Skip this replicate iteration if no networks successfully survived burn-in
+            if isempty(realised_networks)
+                @warn "Iteration $i (t = $t): no realised networks. Skipping."
+                continue
+            end
+
+            # Record realised networks and associated metadata
+
+            for (net_name, realised) in realised_networks
+
+                A_realised = realised.A
+                params = realised.params
+                final_biomasses = realised.biomasses
+                survivors = realised.survivors
+
+                S_realised = length(survivors)
+                C_realised = sum(A_realised) / (S_realised^2)
+
+                # Save realised adjacency matrix
+
+                push!(adjacency_store, (
                     t=t,
-                    threshold=survival_threshold,
-                    B0=B_init
+                    net_id=i,
+                    community=community_name,
+                    net_type=net_name,
+                    stage="burnin",
+                    S=S_realised,
+                    C=C_realised,
+                    adjacency=copy(A_realised)
+                ))
+
+                # Record species metadata after burn-in
+
+                temp_metadata = DataFrame()
+
+                record_species_stage!(
+                    temp_metadata,
+                    i,
+                    net_name,
+                    "post_burn_in",
+                    A_realised,
+                    df.bodymass,
+                    params,
+                    survivors,
+                    final_biomasses
                 )
 
-            end
-            if realised !== nothing
-                realised_networks[net_name] = realised
-            end
-        end
+                temp_metadata.t_val .= t
+                temp_metadata.community .= community_name
 
-        # Skip this replicate iteration if no networks successfully survived burn-in
-        if isempty(realised_networks)
-            @warn "Iteration $i (t = $t): no realised networks. Skipping."
-            continue
-        end
+                append!(species_metadata_store, temp_metadata, cols=:union)
 
-        # Record realised networks and associated metadata
+                # Network summary
 
-        for (net_name, realised) in realised_networks
-
-            A_realised = realised.A
-            params = realised.params
-            final_biomasses = realised.biomasses
-            survivors = realised.survivors
-
-            S_realised = length(survivors)
-            C_realised = sum(A_realised) / (S_realised^2)
-
-            # Save realised adjacency matrix
-
-            push!(adjacency_store, (
-                t=t,
-                net_id=i,
-                net_type=net_name,
-                stage="burnin",
-                S=S_realised,
-                C=C_realised,
-                adjacency=copy(A_realised)
-            ))
-
-            # Record species metadata after burn-in
-
-            temp_metadata = DataFrame()
-
-            record_species_stage!(
-                temp_metadata,
-                i,
-                net_name,
-                "post_burn_in",
-                A_realised,
-                df.bodymass,
-                params,
-                survivors,
-                final_biomasses
-            )
-
-            temp_metadata.t_val .= t
-
-            append!(species_metadata_store, temp_metadata, cols=:union)
-
-            # Network summary
-
-            row = Dict(
-                :t_val => t,
-                :net_id => i,
-                :net_type => net_name,
-                :C_target => C_targ, :S_creation => creation_metrics[net_name].S,
-                :C_creation => creation_metrics[net_name].C,
-                :C_realised => C_realised
-            )
-
-            push!(summary_rows, row)
-
-            # Archive realised network
-
-            # Archive realised network
-
-            network_archive[(i, net_name)] = Dict("generation" => Dict(
-                    "burnin_time" => t,
-                    "C_target" => C_targ,
-                    "bodymass" => copy(df.bodymass),
-                    "B0" => copy(B_init)
-                ), "creation" => Dict(
-                    "A" => copy(initial_networks[net_name].A),
-                    "S" => creation_metrics[net_name].S,
-                    "C" => creation_metrics[net_name].C
-                ), "realised" => Dict(
-                    "A" => copy(A_realised),
-                    "params" => params,
-                    "biomasses" => final_biomasses,
-                    "survivors" => survivors,
-                    "S" => S_realised,
-                    "C" => C_realised
+                row = Dict(
+                    :t_val => t,
+                    :net_id => i,
+                    :community => community_name,
+                    :net_type => net_name,
+                    :C_target => C_targ, :S_creation => creation_metrics[net_name].S,
+                    :C_creation => creation_metrics[net_name].C,
+                    :C_realised => C_realised
                 )
-            )
+
+                push!(summary_rows, row)
+
+                # Archive realised network
+
+                network_archive[(community_name, i, net_name)] = Dict("generation" => Dict(
+                        "community" => community_name,
+                        "burnin_time" => t,
+                        "C_target" => C_targ,
+                        "bodymass" => copy(df.bodymass),
+                        "B0" => copy(B_init)
+                    ), "creation" => Dict(
+                        "A" => copy(initial_networks[net_name].A),
+                        "S" => creation_metrics[net_name].S,
+                        "C" => creation_metrics[net_name].C
+                    ), "realised" => Dict(
+                        "A" => copy(A_realised),
+                        "params" => params,
+                        "biomasses" => final_biomasses,
+                        "survivors" => survivors,
+                        "S" => S_realised,
+                        "C" => C_realised
+                    )
+                )
+            end
         end
     end
 end

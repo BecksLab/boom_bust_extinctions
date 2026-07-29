@@ -36,6 +36,7 @@ for i in 1:nrow(networks)
     d = _network_summary(N)
     d[:net_id] = networks.net_id[i]
     d[:net_type] = networks.net_type[i]
+    d[:community] = networks.community[i]
     d[:stage] = networks.stage[i]
 
     # send to df
@@ -55,6 +56,7 @@ deg_rows = DataFrame(
         vul = Any[],
         net_id = Any[],
         net_type = Any[],
+        community = Any[],
         stage = Any[])
 
 for i in 1:nrow(networks)
@@ -70,7 +72,8 @@ for i in 1:nrow(networks)
         vul = collect(values(vul)),
         net_id = fill(networks.net_id[i], length(gen)),
         net_type = fill(networks.net_type[i], length(gen)),
-        stage = fill(networks.stage[i], length(gen))
+        stage = fill(networks.stage[i], length(gen)),
+        community = fill(networks.community[i], length(gen))
     )
 
     # send to df

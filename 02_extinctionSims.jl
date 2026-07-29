@@ -92,7 +92,7 @@ for extinction_t in extinction_times
     println()
 
 
-    for ((net_id, net_name), network) in network_metadata
+    for ((community, net_id, net_name), network) in network_metadata
 
 
         # Extract lineage components
@@ -139,6 +139,7 @@ for extinction_t in extinction_times
 
         topo_creation_df.net_id .= net_id
         topo_creation_df.net_type .= net_name
+        topo_creation_df.community .= community
         topo_creation_df.extinction_stage .= "creation"
         topo_creation_df.extinction_method .= "topological"
         topo_creation_df.extinction_time .= extinction_t
@@ -186,6 +187,7 @@ for extinction_t in extinction_times
 
         topo_realised_df.net_id .= net_id
         topo_realised_df.net_type .= net_name
+        topo_realised_df.community .= community
         topo_realised_df.extinction_stage .= "realised"
         topo_realised_df.extinction_method .= "topological"
         topo_realised_df.extinction_time .= extinction_t
@@ -225,6 +227,7 @@ for extinction_t in extinction_times
 
         dyn_df.net_id .= net_id
         dyn_df.net_type .= net_name
+        dyn_df.community .= community
         dyn_df.extinction_stage .= "realised"
         dyn_df.extinction_method .= "dynamic"
         dyn_df.extinction_time .= extinction_t
@@ -240,6 +243,7 @@ for extinction_t in extinction_times
         summary_row = Dict(:net_id => net_id,
             :net_type => net_name,
             :extinction_time => extinction_t,
+            :community => community,
             :S_creation => creation["S"],
             :C_creation => creation["C"],
             :S_realised => realised["S"],
