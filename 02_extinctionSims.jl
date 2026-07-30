@@ -78,10 +78,6 @@ survival_threshold = archive["metadata"]["survival_threshold"]
 
 # --- 5. Run extinction simulations -------------------------------------------
 
-
-# --- 5. Run extinction simulations -------------------------------------------
-
-
 for extinction_t in extinction_times
 
     println()
