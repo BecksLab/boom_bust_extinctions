@@ -1,8 +1,6 @@
 # General sundry internal functions
 
 using FoodWebTools
-#using Graphs
-#using GraphsMatching
 using LinearAlgebra
 using SpeciesInteractionNetworks
 using Statistics

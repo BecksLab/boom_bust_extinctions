@@ -3,9 +3,6 @@
 
 using CSV
 using DataFrames
-using DifferentialEquations
-using Distributions
-using EcologicalNetworksDynamics
 using Extinctions
 using FoodWebTools
 using JLD2
