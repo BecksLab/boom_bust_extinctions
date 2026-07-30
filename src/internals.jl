@@ -787,3 +787,30 @@ function record_species_stage!(store, run_id, net_name, stage, A, bodysizes, par
     )
     append!(store, df)
 end
+
+"""
+Helper to find best threshold value that returns an lmatrix network matching 
+the target connectance
+"""
+function atn_build_range(df, prods;
+                         thresholds=0.01:0.01:0.12)
+
+    results = NamedTuple[]
+
+    for thresh in thresholds
+        adj = lmatrix(df.species, df.bodymass, prods;
+                      threshold=thresh)
+
+        S = size(adj, 1)
+        L = sum(adj)
+        Co = L / S^2
+
+        push!(results, (
+            threshold = thresh,
+            connectance = Co,
+            adjacency = adj
+        ))
+    end
+
+    return results
+end

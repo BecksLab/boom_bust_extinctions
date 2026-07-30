@@ -175,8 +175,15 @@ for t in t_values
 
             niche_fw = Foodweb(:niche; S=size(pfim_meta, 1), C=C_targ)
 
+            # For ATN we will vary thresholding to find best fit to Co
             prods = map(==("primary"), string.(df.tiering))
-            atn_fw = Foodweb(lmatrix(df.species, df.bodymass, prods; threshold=0.06))
+
+            # build range
+            atn_range = atn_build_range(df, prods)
+            # find best fit
+            best = argmin(abs.(getfield.(atn_range, :connectance) .- C_targ))
+            # get Foofweb object
+            atn_fw = Foodweb(atn_range[best].adjacency)
 
             # Consolidate all initial networks into one dictionary
             initial_networks = Dict(
