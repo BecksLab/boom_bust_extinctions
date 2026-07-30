@@ -699,6 +699,7 @@ function realise_network(
         show_degenerated=false,
         callback=CallbackSet(
             extinction_callback(params, survival_threshold),
+            TerminateSteadyState(1e-14, 1e-12, DiffEqCallbacks.allDerivPass),
         )
     )
 
