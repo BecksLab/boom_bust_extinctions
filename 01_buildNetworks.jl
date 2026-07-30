@@ -82,9 +82,9 @@ summary_rows = Dict[]
 communities = Dict("dolomites" => Dict(
         "traits" => CSV.read("data/dolomites_community.csv", DataFrame),
         "plankton" => CSV.read("data/dolomites_plankton.csv", DataFrame)
-    ), "russia" => Dict(
-        "traits" => CSV.read("data/russia_community.csv", DataFrame),
-        "plankton" => CSV.read("data/russia_plankton.csv", DataFrame)
+    ), "greenland" => Dict(
+        "traits" => CSV.read("data/greenland_community.csv", DataFrame),
+        "plankton" => CSV.read("data/greenland_plankton.csv", DataFrame)
     ))
 feeding_rules = CSV.read("data/feeding_rules.csv", DataFrame)
 
