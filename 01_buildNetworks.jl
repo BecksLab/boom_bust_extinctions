@@ -85,6 +85,21 @@ communities = Dict("dolomites" => Dict(
     ), "greenland" => Dict(
         "traits" => CSV.read("data/greenland_community.csv", DataFrame),
         "plankton" => CSV.read("data/greenland_plankton.csv", DataFrame)
+    ), "russia" => Dict(
+        "traits" => CSV.read("data/russia_community.csv", DataFrame),
+        "plankton" => CSV.read("data/russia_plankton.csv", DataFrame)
+    ), "tibet" => Dict(
+        "traits" => CSV.read("data/tibet_community.csv", DataFrame),
+        "plankton" => CSV.read("data/tibet_plankton.csv", DataFrame)
+    ), "turkiye" => Dict(
+        "traits" => CSV.read("data/turkiye_community.csv", DataFrame),
+        "plankton" => CSV.read("data/turkiye_plankton.csv", DataFrame)
+    ), "meishan" => Dict(
+        "traits" => CSV.read("data/meishan_community.csv", DataFrame),
+        "plankton" => CSV.read("data/meishan_plankton.csv", DataFrame)
+    ), "kashmir" => Dict(
+        "traits" => CSV.read("data/kashmir_community.csv", DataFrame),
+        "plankton" => CSV.read("data/kashmir_plankton.csv", DataFrame)
     ))
 feeding_rules = CSV.read("data/feeding_rules.csv", DataFrame)
 
