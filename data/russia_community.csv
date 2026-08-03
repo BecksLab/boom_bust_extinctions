@@ -1,12 +1,6 @@
 species,size,motility,feeding,tiering
-Cunavella_etheridgeiformis,medium,facultative,herbivore,deep_infaunal
-Deltopecten_limaeformis,medium,nonmotile_attached,herbivore,epifaunal
-Intomodesma_costatum,medium,nonmotile_attached,herbivore,epifaunal
-Intomodesma_postevenicum,large,nonmotile_attached,herbivore,epifaunal
-Intomodesma_sp,medium,nonmotile_attached,herbivore,epifaunal
-Maitaia_sp,small,nonmotile_attached,herbivore,epifaunal
-Palaeolima_afanasievi,medium,nonmotile_attached,herbivore,epifaunal
-Praeundulomya_dibica,medium,facultative,herbivore,deep_infaunal
-Pseudomonotis_cf_speluncaria,medium,nonmotile_attached,herbivore,epifaunal
-Unionites_kobyumaensis,small,facultative,herbivore,shallow_infaunal
-Voluceropecten_volucer,medium,nonmotile_attached,herbivore,epifaunal
+Bivalvia_1,medium,facultative,herbivore,deep_infaunal
+Bivalvia_3,small,facultative,herbivore,shallow_infaunal
+Bivalvia_4,large,nonmotile_attached,herbivore,epifaunal
+Bivalvia_5,medium,nonmotile_attached,herbivore,epifaunal
+Bivalvia_6,small,nonmotile_attached,herbivore,epifaunal

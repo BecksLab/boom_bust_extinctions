@@ -1,0 +1,17 @@
+"species","motility","tiering","feeding","size","bodymass","biomass"
+"0.60_phytoplankton","primary","primary","primary","primary",0.006,0.0569893307983875
+"1.90_phytoplankton","primary","primary","primary","primary",0.019,0.221456691622734
+"6.00_phytoplankton","primary","primary","primary","primary",0.06,0.235037729144096
+"19.00_phytoplankton","primary","primary","primary","primary",0.19,0.131892949342728
+"60.00_phytoplankton","primary","primary","primary","primary",0.6,0.00960666593164206
+"190.00_phytoplankton","primary","primary","primary","primary",1.9,6.09351319402762e-11
+"600.00_phytoplankton","primary","primary","primary","primary",6,1.53287313398032e-11
+"1900.00_phytoplankton","primary","primary","primary","primary",19,4.60157259518645e-12
+"0.60_zooplankton","zooplankton","zooplankton","zooplankton","zooplankton",0.006,7.7258664743507e-11
+"1.90_zooplankton","zooplankton","zooplankton","zooplankton","zooplankton",0.019,0.0255875922739506
+"6.00_zooplankton","zooplankton","zooplankton","zooplankton","zooplankton",0.06,0.0904931277036667
+"19.00_zooplankton","zooplankton","zooplankton","zooplankton","zooplankton",0.19,0.164565697312355
+"60.00_zooplankton","zooplankton","zooplankton","zooplankton","zooplankton",0.6,0.246628478169441
+"190.00_zooplankton","zooplankton","zooplankton","zooplankton","zooplankton",1.9,0.208786219358444
+"600.00_zooplankton","zooplankton","zooplankton","zooplankton","zooplankton",6,1.25455867916457e-10
+"1900.00_zooplankton","zooplankton","zooplankton","zooplankton","zooplankton",19,2.75805437516263e-11
