@@ -22,7 +22,7 @@ using SpeciesInteractionNetworks
 using Statistics
 
 # call internal functions
-include("../src/internals.jl")
+include("src/internals.jl")
 
 # set seed
 import Random
@@ -35,7 +35,7 @@ dyn_curve_store  = DataFrame()
 species_store = DataFrame()
 
 # --- Global Params ---
-n_networks = 1000                  # number of networks to make
+n_networks = 100                   # number of networks to make
 t = 5000                           # relaxation time after perturbation
 survival_threshold = 1e-30         # extinction threshold
 S_min = 20                         # minimum number spp
@@ -113,7 +113,7 @@ for i in 1:n_networks
     N = build_network(final_adj_matrix)
 
     # --- 6. Topological extinctions ---
-    topo_results = run_topological_extinctions(N, params)
+    topo_results = run_topological_extinctions(N, params.body_mass)
     # r50
     R_topo = compute_robustness(topo_results)
     # get extinction curves
@@ -129,7 +129,8 @@ for i in 1:n_networks
     append!(topo_curve_store, topo_df)
 
     # --- 7. Dynamic extinctions ---
-    dynamic_results = run_dynamic_extinctions(params, final_biomasses)
+    dynamic_results = run_dynamic_extinctions(params,
+                final_biomasses)
     # r50
     R_dyn = compute_robustness(dynamic_results)
     # get extinction curves
@@ -173,6 +174,6 @@ results_df = DataFrame(rows)
 all_curve_df = vcat(topo_curve_store, dyn_curve_store)
 
 # Write files
-CSV.write("../outputs/robustness_summaries.csv", results_df)
-CSV.write("../outputs/extinction_curves.csv", all_curve_df)
-CSV.write("../outputs/species_metadata.csv", species_store)
+CSV.write("outputs/robustness_summaries.csv", results_df)
+CSV.write("outputs/extinction_curves.csv", all_curve_df)
+CSV.write("outputs/species_metadata.csv", species_store)
