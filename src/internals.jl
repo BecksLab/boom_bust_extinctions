@@ -134,12 +134,12 @@ function run_topological_extinctions(N, body_mass)
 
     scenarios = Dict(
         "degree_high" => extinction(N, "degree", true),
-        #"degree_low"    => extinction(N, "degree", false),
-        #"vul_high"      => extinction(N, "vulnerability", true),
-        #"vul_low"       => extinction(N, "vulnerability", false),
-        #"gen_high"      => extinction(N, "generality", true),
-        #"gen_low"       => extinction(N, "generality", false),
-        #"bm_high" => extinction(N, Symbol.(sortperm(body_mass, rev=true))),
+        "degree_low"    => extinction(N, "degree", false),
+        "vul_high"      => extinction(N, "vulnerability", true),
+        "vul_low"       => extinction(N, "vulnerability", false),
+        "gen_high"      => extinction(N, "generality", true),
+        "gen_low"       => extinction(N, "generality", false),
+        "bm_high" => extinction(N, Symbol.(sortperm(body_mass, rev=true))),
         "bm_low" => extinction(N, Symbol.(sortperm(body_mass, rev=false))),
         "rand_basal" => extinction(N; protect=:consumer),
         "rand_consumer" => extinction(N; protect=:basal)
@@ -398,12 +398,12 @@ function run_dynamic_extinctions(params, B; t=5000, show_progress=true)
 
     scenarios = [
         ("degree_high", :degree, true),
-        #("degree_low",    :degree, false),
-        #("vul_high",      :vulnerability, true),
-        #("vul_low",       :vulnerability, false),
-        #("gen_high",      :generality, true),
-        #("gen_low",       :generality, false),
-        #("bm_high", :bodymass, true),
+        ("degree_low",    :degree, false),
+        ("vul_high",      :vulnerability, true),
+        ("vul_low",       :vulnerability, false),
+        ("gen_high",      :generality, true),
+        ("gen_low",       :generality, false),
+        ("bm_high", :bodymass, true),
         ("bm_low", :bodymass, false),
         ("rand_basal", :random_basal, true),
         ("rand_consumer", :random_consumer, true)
